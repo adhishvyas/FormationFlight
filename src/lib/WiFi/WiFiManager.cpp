@@ -89,7 +89,18 @@ WiFiManager::WiFiManager()
         request->send(response);
     });
     server->on("/peermanager/spoof", HTTP_POST, [](AsyncWebServerRequest *request) {
-        PeerManager::getSingleton()->enableSpoofing(true);
+        // With lat & lon, position a single spoofed peer explicitly (repeatable bench testing).
+        // Without them, fall back to the original fixed 100m-ring of 5 peers.
+        if (request->hasParam("lat", true) && request->hasParam("lon", true)) {
+            uint8_t index = request->hasParam("index", true) ? request->getParam("index", true)->value().toInt() : 0;
+            double lat = request->getParam("lat", true)->value().toDouble();
+            double lon = request->getParam("lon", true)->value().toDouble();
+            double course = request->hasParam("course", true) ? request->getParam("course", true)->value().toDouble() : 0;
+            double speed = request->hasParam("speed", true) ? request->getParam("speed", true)->value().toDouble() : 0;
+            PeerManager::getSingleton()->spoofPeer(index, lat, lon, course, speed);
+        } else {
+            PeerManager::getSingleton()->enableSpoofing(true);
+        }
         request->send(200, "text/plain", "OK");
     });
     // MSPManager

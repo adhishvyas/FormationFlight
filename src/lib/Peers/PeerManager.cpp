@@ -26,6 +26,13 @@ peer_t *PeerManager::getSpoofedPeer(uint8_t index)
         return nullptr;
     }
 
+    // Peer was explicitly positioned via spoofPeer(); leave it as-is rather than
+    // overwriting it with the automatic 100m-ring position below.
+    if (spoofOverride[index])
+    {
+        return &spoofedPeers[index];
+    }
+
     GNSSLocation spoofOrigin = GNSSManager::getSingleton()->getLocation();
     if (spoofOrigin.fixType == GNSS_FIX_TYPE_NONE)
     {
@@ -86,6 +93,16 @@ const peer_t *PeerManager::getPeer(uint8_t index)
     return this->getPeerMutable(index);
 }
 
+const peer_t *PeerManager::getPeerById(uint8_t id)
+{
+    if (id == 0 || id > NODES_MAX)
+    {
+        return nullptr;
+    }
+
+    return this->getPeer(id - 1);
+}
+
 void PeerManager::reset()
 {
     for (int i = 0; i < NODES_MAX; i++)
@@ -122,6 +139,8 @@ void PeerManager::reset()
 
         strcpy(peers[i].name, "");
         strcpy(spoofedPeers[i].name, "");
+
+        spoofOverride[i] = false;
     }
 }
 
@@ -237,5 +256,54 @@ void PeerManager::statusJson(JsonDocument *doc)
 void PeerManager::enableSpoofing(bool enabled)
 {
     this->spoofingPeers = enabled;
+}
+
+// Sets a single spoofed peer's position/course explicitly (bench-test tooling), instead of
+// the fixed 100m-ring generated automatically by getSpoofedPeer(). Also enables spoofing.
+void PeerManager::spoofPeer(uint8_t index, double lat, double lon, double course, double speed)
+{
+    if (index >= NODES_MAX)
+    {
+        return;
+    }
+
+    uint8_t id = index + 1;
+    spoofedPeers[index].id = id;
+    spoofedPeers[index].gps.lat = (int32_t)(lat * 1000000);
+    spoofedPeers[index].gps.lon = (int32_t)(lon * 1000000);
+    spoofedPeers[index].gps.alt = 100;
+    spoofedPeers[index].gps.groundSpeed = (int16_t)(speed * 100); // m/s -> cm/s
+    spoofedPeers[index].gps.groundCourse = (int16_t)(course * 10); // degrees -> degrees x 10
+
+    spoofedPeers[index].gps_pre = spoofedPeers[index].gps;
+    spoofedPeers[index].gps_pre_updated = millis();
+
+    spoofedPeers[index].state = 1;
+    spoofedPeers[index].lost = 0;
+    spoofedPeers[index].updated = millis();
+    spoofedPeers[index].lq = 4;
+    spoofedPeers[index].name[0] = 'F';
+    spoofedPeers[index].name[1] = 'A';
+    spoofedPeers[index].name[2] = 'K' + index;
+    spoofedPeers[index].name[3] = '\0';
+    spoofedPeers[index].rssi = -50 + id;
+
+    spoofOverride[index] = true;
+    this->spoofingPeers = true;
+}
+
+bool peer_is_stale(const peer_t *peer, uint32_t timeout_ms)
+{
+    if (peer == nullptr || peer->id == 0)
+    {
+        return true;
+    }
+
+    if (peer->lost)
+    {
+        return true;
+    }
+
+    return (millis() - peer->updated) > timeout_ms;
 }
 

@@ -37,6 +37,18 @@ uint8_t MSPManager::getState()
     return bitRead(modes, 0);
 }
 
+// Returns whether GCS NAV is currently active on the FC (follow-mode trigger, §5[C] option 2).
+bool MSPManager::isGCSNavActive()
+{
+    if (!ready || !hostIsFlightController(this->getFCVariant()))
+    {
+        return false;
+    }
+    uint32_t modes;
+    msp->getActiveModes(&modes);
+    return bitRead(modes, MSP_MODE_GCSNAV);
+}
+
 // Requests the name of the flight controller over MSP without caching
 void MSPManager::getName(char *name, size_t length)
 {
@@ -129,6 +141,33 @@ msp_analog_t MSPManager::getAnalogValues()
     }
     cached = millis();
     return analog;
+}
+
+// Returns the FC's home/baro-relative altitude estimate in centimeters (MSP_ALTITUDE), cached
+// briefly since the follow module polls this every cycle at FOLLOW_EMIT_HZ.
+int32_t MSPManager::local_altitude_cm()
+{
+    static msp_altitude_t altitude = {};
+    static unsigned long cached = 0;
+
+    if (!hostIsFlightController(this->getFCVariant()))
+    {
+        memset(&altitude, 0, sizeof(altitude));
+        return 0;
+    }
+
+    if (millis() - cached < 100)
+    {
+        return altitude.estimatedActualPosition;
+    }
+
+    if (!msp->request(MSP_ALTITUDE, &altitude, sizeof(altitude)))
+    {
+        memset(&altitude, 0, sizeof(altitude));
+        return 0;
+    }
+    cached = millis();
+    return altitude.estimatedActualPosition;
 }
 
 // Sends a MSP request for the GPS position of the FC; will be all-zero if the request failed
@@ -224,6 +263,21 @@ void MSPManager::sendRadar(const peer_t *peer)
     position.lq = peer->lq;
     msp->command2(MSP2_COMMON_SET_RADAR_POS, &position, sizeof(position), 0);
     peerUpdatesSent++;
+}
+
+// MSP_SET_WP (#209) - INAV follow-me special waypoint #255.
+// Requires NAV POSHOLD + GCS NAV active on the follower FC.
+void MSPManager::sendFollowWaypoint(int32_t lat_1e7, int32_t lon_1e7, int32_t alt_cm)
+{
+    msp_set_wp_t wp{};
+    wp.waypointNumber = 255;
+    wp.action = MSP_NAV_STATUS_WAYPOINT_ACTION_WAYPOINT; // must be 1
+    wp.lat = lat_1e7;
+    wp.lon = lon_1e7;
+    wp.alt = alt_cm;         // home-relative, p3 bit0 = 0 below
+    wp.p1 = 0; wp.p2 = 0; wp.p3 = 0;
+    wp.flag = 0;
+    msp->command(MSP_SET_WP, &wp, sizeof(wp));
 }
 
 // Schedules the next transmission loop at the given timestamp

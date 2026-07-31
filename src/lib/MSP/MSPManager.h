@@ -26,7 +26,15 @@ public:
     msp_fc_version_t getFCVersion();
     msp_raw_gps_t getLocation();
     msp_analog_t getAnalogValues();
+    // Home/baro-relative altitude estimate from the FC, in centimeters (MSP_ALTITUDE).
+    // Distinct from getLocation().alt, which is GPS/MSL altitude in meters.
+    int32_t local_altitude_cm();
+    // Whether the FC currently has GCS NAV active (MSP_MODE_GCSNAV), e.g. for follow-mode gating.
+    bool isGCSNavActive();
     void sendRadar(const peer_t *peer);
+    // Sends the INAV follow-me special waypoint #255 via MSP_SET_WP.
+    // Requires NAV POSHOLD + GCS NAV active on the follower FC.
+    void sendFollowWaypoint(int32_t lat_1e7, int32_t lon_1e7, int32_t alt_cm);
     void sendLocation(GNSSLocation location);
     void begin(Stream &stream);
     void statusJson(JsonDocument *doc);

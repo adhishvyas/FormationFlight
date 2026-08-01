@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include <ArduinoJson.h>
 #include "FollowConfig.h"
 #include "../Peers/PeerManager.h"
 
@@ -36,6 +37,10 @@ class FollowManager
 {
 public:
     void loop();
+    // Read-only snapshot for GET /followmanager/status (spec §10.2): PeerLock
+    // state, locked peer id/name (if any), gate active/inactive, and the last
+    // computed target (if any target has been solved this session).
+    void statusJson(JsonDocument *doc);
     static FollowManager *getSingleton();
 
 private:
@@ -45,6 +50,13 @@ private:
     double lastValidCourseDeg = 0.0;
     bool haveValidCourse = false;
     unsigned long nextRunTime = 0;
+
+    // Last target actually emitted via sendFollowWaypoint() (i.e. it passed
+    // targetSane()), for status reporting only — not used by the control loop.
+    bool haveLastTarget = false;
+    FollowTarget lastTarget{};
+    int32_t lastTargetAltCm = 0;
+    unsigned long lastTargetTime = 0;
 
     bool followSwitchActive();
     // Advances the PeerLock state machine (spec §6.3) and returns the peer to

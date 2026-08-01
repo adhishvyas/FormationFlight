@@ -130,7 +130,7 @@ Spec §13 flags that `ConfigHandler.cpp:37`'s `if (true || cfg.version != VERSIO
 
 ---
 
-## Phase 0 — Foundation (parallel, no dependencies)
+## Phase 0 — Foundation (parallel, no dependencies) - [Completed]
 
 Each of these is a small, independent change to existing files. None require the others to exist first, and each is unit-testable / bench-verifiable in isolation before FollowManager consumes them.
 
@@ -151,7 +151,7 @@ Each of these is a small, independent change to existing files. None require the
 
 ---
 
-## Phase 1 — Core follow module (compile-time config only)
+## Phase 1 — Core follow module (compile-time config only) [Completed]
 
 **Depends on:** 0A, 0B, 0C, 0D (0E recommended for efficient testing, not a hard code dependency).
 
@@ -184,7 +184,7 @@ Phase 1 is a legitimate stopping point if flight validation needs to happen befo
 
 ---
 
-## Phase 2 — Read-only status visibility
+## Phase 2 — Read-only status visibility [Complete]
 
 **Depends on:** Phase 1.
 
@@ -194,7 +194,7 @@ This needs no EEPROM and no `ConfigHandler` fix, so it's unblocked regardless of
 
 *Test:* poll the endpoint during a bench run, cross-check against OSD/Configurator state.
 
-## Phase 2b — AUX-channel trigger (optional / stretch)
+## Phase 2b — AUX-channel trigger (optional / stretch) [Deferred]
 
 **Depends on:** Phase 1 (needs `follow_switch_active()` to exist as a swappable gate).
 

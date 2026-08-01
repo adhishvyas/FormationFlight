@@ -293,4 +293,37 @@ void FollowManager::loop()
     }
 
     MSPManager::getSingleton()->sendFollowWaypoint(target.lat_1e7, target.lon_1e7, altCm);
+
+    haveLastTarget = true;
+    lastTarget = target;
+    lastTargetAltCm = altCm;
+    lastTargetTime = millis();
+}
+
+static const char *lockStateName(FollowLockState state)
+{
+    switch (state)
+    {
+        case FOLLOW_LOCK_IDLE:            return "IDLE";
+        case FOLLOW_LOCK_ACQUIRING:       return "ACQUIRING";
+        case FOLLOW_LOCK_LOCKED:          return "LOCKED";
+        case FOLLOW_LOCK_LOCKED_HOLDING:  return "LOCKED_HOLDING";
+        default:                          return "UNKNOWN";
+    }
+}
+
+void FollowManager::statusJson(JsonDocument *doc)
+{
+    (*doc)["state"] = lockStateName(state);
+    (*doc)["gateActive"] = followSwitchActive();
+    (*doc)["lockedId"] = lockedId;
+    (*doc)["lockedName"] = lockedName;
+    if (haveLastTarget)
+    {
+        JsonObject target = doc->createNestedObject("lastTarget");
+        target["lat"] = lastTarget.lat_1e7;
+        target["lon"] = lastTarget.lon_1e7;
+        target["altCm"] = lastTargetAltCm;
+        target["ageMs"] = millis() - lastTargetTime;
+    }
 }

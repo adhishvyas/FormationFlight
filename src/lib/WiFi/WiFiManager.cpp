@@ -17,6 +17,7 @@
 #include "../Power/PowerManager.h"
 #include "../Statistics/StatsManager.h"
 #include "../Cryptography/CryptoManager.h"
+#include "../Follow/FollowManager.h"
 #include "webcontent.h"
 
 WiFiManager::WiFiManager()
@@ -156,6 +157,14 @@ WiFiManager::WiFiManager()
     server->on("/cryptomanager/status", HTTP_GET, [](AsyncWebServerRequest *request) {
         StaticJsonDocument<1024> doc;
         CryptoManager::getSingleton()->statusJson(&doc);
+        AsyncResponseStream *response = request->beginResponseStream("application/json");
+        serializeJson(doc, *response);
+        request->send(response);
+    });
+    // FollowManager
+    server->on("/followmanager/status", HTTP_GET, [](AsyncWebServerRequest *request) {
+        StaticJsonDocument<512> doc;
+        FollowManager::getSingleton()->statusJson(&doc);
         AsyncResponseStream *response = request->beginResponseStream("application/json");
         serializeJson(doc, *response);
         request->send(response);

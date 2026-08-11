@@ -76,6 +76,16 @@ enum FollowStationaryMode {
 #define FOLLOW_MAX_TARGET_DIST_M 50.0
 #endif
 
+// Absolute floor on the final commanded home-relative altitude, meters
+// (spec §7.6). Distinct from FOLLOW_MIN_VSEP_M above: that governs the
+// configured slot's separation from the leader; this clamps alt_cm itself
+// so a low/descending/landing leader (or a BELOW slot) can never command
+// the follower at or below this altitude. Applied as a clamp, not a
+// rejection — converted to centimeters at the comparison site.
+#ifndef FOLLOW_MIN_ALT_M
+#define FOLLOW_MIN_ALT_M 3.0
+#endif
+
 #ifndef FOLLOW_TRIGGER_MODE
 #define FOLLOW_TRIGGER_MODE FOLLOW_TRIGGER_GCSNAV
 #endif

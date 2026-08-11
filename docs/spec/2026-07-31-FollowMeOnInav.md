@@ -10,6 +10,9 @@
 - Added §6.3: peer selection is now a lock-on-first-detected state machine, not a per-cycle "pick first active" scan (addresses requirement: don't fail over to a second peer if the locked one is lost).
 - Added §10: follow parameters are runtime-configurable via the web UI, not compile-time-only (addresses requirement: web UI configurability). This supersedes v1's "config may be compile-time initially" framing.
 
+**Changelog since v2:**
+- Added §7.6: an absolute, configurable altitude floor (`FOLLOW_MIN_ALT_M`) clamping the final commanded altitude, independent of §7.4's leader-relative vertical-separation rule. Closes a gap where a low/landing/descending leader (or a `BELOW` slot) could command the follower to zero or negative home-relative altitude. Found in review — **not yet implemented in the shipped Phase 1 code** as of this revision; see the plan's post-Phase-1 addendum.
+
 ---
 
 ## 1. Purpose & Scope
@@ -193,6 +196,14 @@ void FollowManager::loop() {
                    + (int32_t)(p->relalt * 100)           // leader vs follower, raw-GPS delta, m->cm
                    + (int32_t)(o.vertical_m * 100);       // configured vertical offset
 
+    // Hard floor (§7.6): never command the follower below a configurable
+    // minimum home-relative altitude, regardless of what the leader-relative
+    // offset math produced above — e.g. the leader flying low/landing, or a
+    // BELOW slot dragging the follower toward the ground. Clamp, don't
+    // reject: the follower should keep tracking laterally and hold at the
+    // floor rather than stop emitting entirely.
+    if (alt_cm < FOLLOW_MIN_ALT_CM) alt_cm = FOLLOW_MIN_ALT_CM;
+
     if (!follow_target_sane(p, tgt, alt_cm)) return;    // sanity bounds (§7.4)
     mspManager->sendFollowWaypoint(tgt.lat_1e7, tgt.lon_1e7, alt_cm);
 }
@@ -313,6 +324,17 @@ Default: hold last valid course. Configurable via `FOLLOW_STATIONARY_MODE`.
 if (p->gps.groundSpeed < (int16_t)(FOLLOW_MIN_COURSE_SPEED * 100)) { /* stationary fallback */ }
 ```
 
+### 7.6 Absolute altitude floor (hard floor, home-relative) (NEW — addresses "protect against the leader/follower altitude going too low")
+
+Distinct from §7.4's vertical-separation rule, which governs the offset *relative to the leader* (e.g. requiring a minimum vertical gap for a stacked slot). §7.6 is an absolute clamp on the **final commanded altitude**, protecting against the leader itself flying low, descending, or landing while a follower is engaged. Without it, a follower configured with a `BELOW` vertical slot — or simply trailing a leader that descends toward or below the follower's own home elevation — could be commanded to `alt_cm <= 0`, i.e. at or below home altitude, or even negative. That is a direct flight-into-terrain risk, not a formation-geometry nicety.
+
+- **`FOLLOW_MIN_ALT_M`** (config, §9): minimum home-relative altitude, in meters, that the follower will ever be commanded to. Human-facing (matches the web UI, mirrors the `FOLLOW_MIN_COURSE_SPEED` pattern above); converted to `FOLLOW_MIN_ALT_CM` (`= FOLLOW_MIN_ALT_M * 100`) at the comparison site in `alt_cm`'s home-relative centimeter frame.
+- **Applied as a clamp, not a reject.** If the fully-summed `alt_cm` (§6.2 — follower's own altitude + leader's relative altitude + configured vertical offset) falls below the floor, replace it with the floor value before emitting. Do **not** suppress the whole waypoint the way `follow_target_sane()`'s other checks do. The follower keeps tracking the leader's lateral (lat/lon) position and simply holds at the floor altitude instead; only the vertical component is overridden. Suppressing the entire waypoint instead would leave the follower holding its *last* commanded position indefinitely — not obviously safer than holding at a known, configured-safe minimum altitude, and inconsistent with every other term in §6.2's altitude sum being a plain additive quantity rather than a pass/fail gate.
+- **Ordering:** applied after all three altitude terms are summed (§6.2) and before `follow_target_sane()`'s other checks run, so the floor is the last word on the vertical component regardless of which upstream term (follower's own altitude, leader's relative altitude, or the configured vertical offset) caused the low value.
+- **Default: 3 m.** Low enough to stay out of the way of normal formation-flight altitudes, but enough to keep the follower clear of ground effect/small obstacles at most sites — a deliberately conservative, small default rather than a guess at "safe cruise altitude." Configurable per-site via the web UI (§10) since the appropriate floor height depends on local terrain/obstacles.
+- **Orthogonal to `FOLLOW_MIN_VSEP_M` (§7.4).** The vertical-separation rule prevents the follower's *configured slot* from sitting too close to the leader vertically. The altitude floor prevents the *final commanded altitude* from being too close to the ground, independent of the leader's own altitude or the configured offset. Both checks run; neither substitutes for the other.
+- **Does not replace FC-side protections.** This is a floor on what FF *commands* over MSP, not a substitute for INAV's own failsafe/RTH/ground-proximity behavior on the follower's FC — those remain the authoritative last line of defense (consistent with §8's "FC mode is authoritative" framing).
+
 ---
 
 ## 8. Timing, Rate, and Failsafe
@@ -340,6 +362,7 @@ Behavior / safety:
 - `FOLLOW_MIN_SEP_M`, `FOLLOW_MIN_VSEP_M` (default **13 m** — 5 m physical/collision clearance + 8 m worst-case GPS vertical error budget; see §7.4)
 - `FOLLOW_MIN_COURSE_SPEED` (m/s; converted to cm/s at comparison time against `peer->gps.groundSpeed` — see §7.5), `FOLLOW_STATIONARY_MODE` = `HOLD_COURSE` | `WORLD_FRAME`
 - `FOLLOW_MAX_TARGET_DIST_M` (runtime sanity bound)
+- `FOLLOW_MIN_ALT_M` (default **3 m**, home-relative; converted to `FOLLOW_MIN_ALT_CM` at comparison time — absolute floor clamping the final commanded altitude, independent of `FOLLOW_MIN_VSEP_M`; see §7.6)
 
 ---
 
@@ -356,7 +379,7 @@ Verified against source: FF's config today is **compile-time only in practice**.
 - **New `FollowManager` config struct**, holding every key in §9, distinct from the existing unrelated `config_t cfg` (don't overload that struct — it's small, unrelated, and already fragile per the bug above). Persist it via the same EEPROM primitives `config_save()`/`config_init()` use (`ConfigHandler.cpp`), in its own EEPROM region (offset after `cfg`'s footprint), once the `true ||` bug is fixed.
 - **New endpoints in `WiFiManager.cpp`**, following the existing per-manager pattern exactly:
   - `GET /followmanager/config` — returns current config as JSON (all §9 keys, resolved values — i.e. reflects grid→canonical expansion so the UI can show both views).
-  - `POST /followmanager/config` — accepts JSON body with any subset of §9 keys, validates (including the §7.4 minimum-separation check server-side, not just client-side), updates the in-RAM struct, calls `config_save()`-equivalent to persist, and returns the resolved config back (so the UI can confirm what actually took effect after validation).
+  - `POST /followmanager/config` — accepts JSON body with any subset of §9 keys, validates (including the §7.4 minimum-separation check and the §7.6 altitude-floor value being a sane non-negative number, server-side, not just client-side), updates the in-RAM struct, calls `config_save()`-equivalent to persist, and returns the resolved config back (so the UI can confirm what actually took effect after validation).
   - `GET /followmanager/status` — separate from config: live state for the panel to show while flying/bench-testing — current `PeerLock` state (`IDLE`/`ACQUIRING`/`LOCKED`/`LOCKED_HOLDING`), which peer id/name is locked (if any), gate active/inactive, and the last computed target (for the bench test in §11.1).
 - **New web UI panel**, modeled on the existing `Settings()` component's structure in `html/main.js` but wired to the new endpoints (not the dead `/system/status` path): friendly-grid dropdowns (§7.3) as the primary editing surface with an "advanced" toggle to edit raw `FOLLOW_OFS_*_M`, trigger-mode selector, and a target-peer selector populated live from `/peermanager/status` (so the pilot can pick a specific visible peer by name instead of only `FIRST_ACTIVE`) — this doubles as the escape hatch referenced in §6.3's "user changes a setting" transition.
 - **Resolution order:** compile-time `build_flags` values are the factory defaults used only to seed EEPROM the first time (or after a config reset); once the web UI has saved a value, the persisted value wins on every subsequent boot. This mirrors how `cfg`/`config_save()` would work correctly once §10.1's bug fix lands.
@@ -371,7 +394,7 @@ Verified against source: FF's config today is **compile-time only in practice**.
 
 1. **`src/lib/MSP/MSPManager.{h,cpp}`** — add `sendFollowWaypoint()` using the existing `msp_set_wp_t` + `MSP::command()` (§6.1, not a hand-rolled frame); add `MSP_ALTITUDE` polling + cached `local_altitude_cm()` (§5[B] — confirmed new, not reuse); extend the existing `getActiveModes()`-based state read to expose a "GCS NAV active" accessor (§5[C] — one-line addition to existing code); if using AUX trigger, add new `MSP_RC` polling + accessor.
 2. **`src/lib/Peers/PeerManager.{h,cpp}`** — expose a lookup-by-id accessor (peer table is index-based today, not id-keyed — needed for §6.3's lock-by-id) and a `peer_is_stale(peer_t*)` helper using `peer->updated` (§8). No struct changes needed — `peer->gps.lat/lon/groundCourse/groundSpeed` and `peer->relalt` already carry what's needed (§5[A]).
-3. **`follow` (new module, e.g. `src/lib/Follow/FollowManager.{h,cpp}`)** — `loop()` (§6.2), `PeerLock` state machine (§6.3), `follow_resolve_offset()`, `slotToLatLon()`, `follow_switch_active()`, `follow_target_sane()`, plus a `statusJson()`/config accessors for §10's endpoints.
+3. **`follow` (new module, e.g. `src/lib/Follow/FollowManager.{h,cpp}`)** — `loop()` (§6.2, including the §7.6 altitude-floor clamp), `PeerLock` state machine (§6.3), `follow_resolve_offset()`, `slotToLatLon()`, `follow_switch_active()`, `follow_target_sane()`, plus a `statusJson()`/config accessors for §10's endpoints.
 4. **`src/main.cpp`** — register `FollowManager::getSingleton()->loop()` in the main `loop()` sequence, after `PeerManager`/`GNSSManager`/`MSPManager`, gated the same way `MSPManager` is (§3).
 5. **`src/lib/ConfigHandler.cpp`** — fix the `if (true || ...)` bug (`ConfigHandler.cpp:37`) as a prerequisite for §10's persistence to work at all; this is a pre-existing defect, worth flagging to the team as possibly wanted/known before "fixing" it out from under other config.
 6. **`src/lib/WiFi/WiFiManager.cpp`** — add `/followmanager/config` (GET+POST) and `/followmanager/status` (GET) endpoints (§10.2), following the existing per-manager handler pattern; optionally extend `/peermanager/spoof` or add a parametrized alternative (lat/lon/course, modeled on `/gnssmanager/spoof`'s param handling) to support §11.1's bench tests.
@@ -395,6 +418,7 @@ Verify:
 7. Geometry guards: a sub-minimum-separation config refuses to arm (both firmware-side and web-UI-side, §7.4); stationary-leader fallback behaves as configured — spoof the leader at ~1.5 m/s and ~3 m/s bracketing the `FOLLOW_MIN_COURSE_SPEED` default and confirm the fallback triggers/doesn't at the correct threshold (the cm/s-vs-m/s comparison in §7.5 is easy to get silently wrong).
 8. Altitude accuracy: with two real GPS units (not spoofed) at a known, measured height difference, confirm the commanded `alt_cm` lands within `FOLLOW_MIN_VSEP_M` of the intended offset — quantifies the real-world GPS-vertical-error budget the 13 m default (§7.4) is meant to absorb; §12.1 item 4 above only checks `local_altitude_cm()` in isolation, not the combined leader+follower altitude math.
 9. **Web UI config (§10):** editing a preset/offset/trigger-mode/target-peer in the web panel, saving, and rebooting the follower confirms the value persisted (survives reboot) rather than reverting to compile-time defaults. Confirm changing `FOLLOW_TARGET_PEER` while the gate is active forces a re-acquire per §6.3.
+10. **Altitude floor (§7.6):** with a `BELOW` vertical slot (or `ABOVE`/`LEVEL` plus a spoofed leader at/near the follower's home altitude), drive the leader's altitude down until the summed `alt_cm` (§6.2) would go at or below `FOLLOW_MIN_ALT_M`. Confirm the commanded altitude never drops below the floor, and — critically — that the waypoint is still emitted with the floored altitude and correct lat/lon (i.e. this clamps, it does not silently stop emission like a `follow_target_sane()` rejection would). Also confirm `FOLLOW_MIN_VSEP_M` (§7.4) and `FOLLOW_MIN_ALT_M` (§7.6) are independently exercisable — a config that satisfies one should not be assumed to satisfy the other.
 
 ### 12.2 Flight (progressive, open area, big margins)
 1. Trail slot, large horizontal gap, generous vertical separation, low speed. Manual-override switch tested first.
@@ -406,6 +430,7 @@ Verify:
 - Follower reliably captures and holds every configured named slot within a bounded position error, at the configured altitude offset.
 - Losing the peer link or flipping the switch always returns control safely (hold → POSHOLD/manual) with no flyaway.
 - No `MSP_SET_WP` is ever emitted with stale, out-of-bounds, or mis-scaled coordinates.
+- The follower is never commanded to a home-relative altitude below `FOLLOW_MIN_ALT_M`, regardless of the leader's altitude, a descending/landing leader, or the configured vertical offset — the altitude is clamped to the floor, not treated as a reason to withhold the waypoint (§7.6).
 - With multiple peers visible, the follower always locks to exactly one (the first detected, or the explicitly configured id) and never auto-retargets to another on loss.
 - All follow parameters are editable and persist via the web UI without a reflash.
 

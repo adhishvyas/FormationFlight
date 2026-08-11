@@ -287,6 +287,18 @@ void FollowManager::loop()
                    + offset.vertical_m * 100.0;
     int32_t altCm = (int32_t)lround(altCmD);
 
+    // Hard floor (spec §7.6): never command the follower below a
+    // configurable minimum home-relative altitude, regardless of what the
+    // sum above produced — e.g. the leader flying low/landing, or a BELOW
+    // slot dragging the follower toward the ground. Clamp, don't reject:
+    // unlike targetSane() below, this must not suppress the waypoint —
+    // the follower should keep tracking laterally and hold at the floor.
+    int32_t floorCm = (int32_t)lround(FOLLOW_MIN_ALT_M * 100.0);
+    if (altCm < floorCm)
+    {
+        altCm = floorCm;
+    }
+
     if (!targetSane(offset, target))
     {
         return;

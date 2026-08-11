@@ -32,6 +32,7 @@ realistic formation distance:
 | `FOLLOW_PEER_TIMEOUT_MS` | 1500 | spec §8 default |
 | `FOLLOW_MIN_COURSE_SPEED` | 2 m/s (human-facing; compared internally against `peer->gps.groundSpeed`, which is cm/s — see below) | spec §7.5 default |
 | `FOLLOW_STATIONARY_MODE` | `HOLD_COURSE` | spec §7.5 default |
+| `FOLLOW_MIN_ALT_M` | 3 m (home-relative absolute floor, clamps `alt_cm` — distinct from `FOLLOW_MIN_VSEP_M`) | spec §7.6 default — found in later review, implemented post-Phase-1, see "Post-Phase 1 addendum" below |
 
 All of §9's keys ship as `#define`s (build_flags) in Phase 1. None are
 runtime-mutable or EEPROM-persisted until Phase 3.
@@ -72,6 +73,52 @@ and must be implemented that way from the start in Phase 1 item 6.
    measurement itself — see the new Phase 1 test item below and spec §13 for
    the longer-term option (leader broadcasting its own home-relative
    altitude).
+
+### Post-Phase 1 addendum: absolute altitude floor (found in review, after Phase 1 shipped) - [Completed]
+
+Neither the original spec's §7.4 vertical-separation rule nor the shipped
+Phase 1 code (`FollowManager.cpp`, `loop()`/`targetSane()`) clamp the
+**final** commanded altitude to any absolute minimum. `FOLLOW_MIN_VSEP_M`
+only constrains the *configured slot offset* relative to the leader — it
+says nothing about what happens if the leader itself descends or lands
+while a follower is engaged, or if the slot is configured `BELOW`. In
+either case the summed `alt_cm` (spec §6.2: follower's own altitude +
+leader's relative altitude + configured vertical offset) can reach zero or
+go negative, commanding the follower toward or below its own home
+altitude — a flight-into-terrain risk, not a formation-geometry nicety.
+This is a gap in the already-shipped Phase 1 code, not just a doc gap —
+see spec §7.6 for the full design.
+
+**Fix (small, isolated patch to the existing Phase 1 module) — implemented:**
+- Added `FOLLOW_MIN_ALT_M` (default 3 m, home-relative) to
+  `src/lib/Follow/FollowConfig.h`, alongside the other `FOLLOW_MIN_*`
+  keys (`FollowConfig.h:79-87`).
+- In `FollowManager::loop()`, immediately after the altitude sum and
+  before `targetSane()` runs, the result is now clamped (not rejected):
+  `if (altCm < floorCm) { altCm = floorCm; }`, with `floorCm` computed as
+  `lround(FOLLOW_MIN_ALT_M * 100.0)` (`FollowManager.cpp:290-300`, spec
+  §6.2/§7.6). Clamping rather than rejecting matters here: rejecting
+  would suppress the whole waypoint the way `targetSane()`'s other checks
+  do, leaving the follower holding its last position; clamping instead
+  lets it keep tracking the leader laterally while holding at a known-safe
+  minimum altitude.
+- No other Phase 1 decision needed revisiting — purely additive.
+- Verified: `pio run -e diy_LoRa_Heltec_WiFi_LoRa_32_433_via_UART` builds
+  successfully with the patch in place.
+
+*Test (still outstanding — bench, not yet run):* spec §12.1 item 10 (new)
+— spoof the leader descending toward or below the follower's home
+altitude with a `BELOW` slot (or a near-zero-relative-altitude leader on a
+`LEVEL`/`ABOVE` slot), confirm the commanded `alt_cm` never drops below
+`FOLLOW_MIN_ALT_M` and — unlike a `targetSane()` rejection — the waypoint
+is still emitted with the floored altitude and correct lat/lon.
+
+This addendum also updates Phase 3/4: `FOLLOW_MIN_ALT_M` is one more §9
+key that needs a runtime config field, EEPROM persistence, and a web UI
+control (with the same non-negative sanity validation client- and
+server-side as `FOLLOW_MIN_SEP_M`/`FOLLOW_MIN_VSEP_M` already get) — no
+new phase is needed, it just rides along with the existing Phase 3B/3C/4
+work for the rest of §9's keys. That part is still pending Phase 3/4.
 
 ---
 
@@ -255,3 +302,4 @@ Not required for the MVP given the chosen Phase 1 default (GCS-NAV trigger), but
 
 - Confirm the `ConfigHandler` `true ||` reset is unintentional before Phase 3A (blocking decision, above).
 - `peer->id` reuse edge case — deferred to real multi-peer testing in Phases 1/5, per spec §13.
+- **Altitude floor (`FOLLOW_MIN_ALT_M`, spec §7.6) is now implemented** (see "Post-Phase 1 addendum" above) — bench test item §12.1 #10 (spoofed low/descending leader) is still outstanding, and the runtime-config/web-UI half rides along with Phase 3/4.

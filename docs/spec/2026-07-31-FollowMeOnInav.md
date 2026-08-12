@@ -1,6 +1,6 @@
 # FormationFlight — Autonomous Follow Mode (Option B) — Engineering Spec
 
-**Status:** Draft for planning — v2, revised against source (see changelog)
+**Status:** Draft for planning — v3, revised against source (see changelog)
 **Target firmware:** FormationFlight (ESP32/ESP8266, PlatformIO/C++)
 **Follower FC:** INAV, multirotor (quadcopter) only
 **Source of truth for the flight controller side:** INAV `GCS NAV` follow-me via MSP `MSP_SET_WP` (#209), special waypoint #255
@@ -12,6 +12,15 @@
 
 **Changelog since v2:**
 - Added §7.6: an absolute, configurable altitude floor (`FOLLOW_MIN_ALT_M`) clamping the final commanded altitude, independent of §7.4's leader-relative vertical-separation rule. Closes a gap where a low/landing/descending leader (or a `BELOW` slot) could command the follower to zero or negative home-relative altitude. Found in review — **not yet implemented in the shipped Phase 1 code** as of this revision; see the plan's post-Phase-1 addendum.
+
+**Changelog since v3:**
+- Split §10 (web UI configuration) into two independent stages, matching the plan's Phase 3/Phase 4 split: **live, in-memory config** (edits apply immediately, lost on reboot, no `ConfigHandler` dependency) and **explicit EEPROM persistence** (a distinct "commit" action, gated on fixing the pre-existing `ConfigHandler` reset bug). Previously §10 described a single combined "edit + auto-persist" flow; that's no longer accurate to the plan and is corrected here. See §10.1 for the rationale and §§10.3–10.4 for the two designs.
+
+**Changelog since v4:**
+- Added §7.7: nose/heading control. The follower can now command its own heading independently of its direction of travel, using the same `MSP_SET_WP` #255 message §4/§6.1 already stream — no second MSP command, no new INAV flight mode. Driven by a new `FOLLOW_HEADING_MODE` key (§9), runtime-editable via the web UI like every other §9 key (§10.3), defaulting to `POINT_LEADER`. §4's `p1` field, previously always `0`, is now load-bearing — see §7.7 and the updated §4 table. Applies uniformly regardless of follower airframe (rotorcraft or fixed-wing) — §7.7 explains why no craft-type branch is needed.
+
+**Changelog since v5:**
+- Added a fifth heading mode, `COURSE_RELATIVE`, to §7.7/§9: like `FIXED`, but the configured degrees value is added to the leader's live course instead of being an absolute compass heading, so the commanded nose angle rotates with the leader instead of staying fixed to north. Renamed the §9 config key from `FOLLOW_HEADING_FIXED_DEG` to `FOLLOW_HEADING_DEG` since it's now shared between `FIXED` (absolute) and `COURSE_RELATIVE` (offset) — its meaning is mode-dependent, not mode-specific.
 
 ---
 
@@ -27,7 +36,8 @@ Add a mode to the FormationFlight (FF) firmware such that, when the pilot engage
 - A configurable follow-geometry section (distance + relative location).
 - Freshness and sanity safety guards inside FF.
 - **Single-leader lock-on behavior:** when multiple peers are visible, follow only the first peer detected at the moment follow mode is engaged; do not automatically retarget to a different peer if the locked one is lost (§6.3).
-- **Runtime configuration via the web UI:** all follow parameters (geometry, safety bounds, trigger mode, target-peer selection) are readable and writable from FF's existing web UI and persist across reboot (§10).
+- **Runtime configuration via the web UI:** all follow parameters (geometry, safety bounds, trigger mode, target-peer selection, nose-heading mode) are readable and writable from FF's existing web UI. Two independent stages (§10): live edits apply immediately and take effect without a reflash, but are lost on reboot unless explicitly persisted via a separate "save permanently" (commit) action, which is what actually survives reboot.
+- **Nose-heading control (§7.7):** the follower can be commanded to point its nose along its direction of travel, at the leader, or at a fixed compass heading, independently of the position it's flying to — addresses formation flying where the follower's direction of travel and desired nose orientation differ (most relevant to rotorcraft, which can translate without turning).
 
 ### 1.3 Out of scope (this iteration)
 - Fixed-wing followers. The follower is assumed to be a multirotor that can hold and reposition. Fixed-wing trail flight is explicitly deferred.
@@ -48,7 +58,7 @@ Add a mode to the FormationFlight (FF) firmware such that, when the pilot engage
 - **FF is display-only today.** FF relays peer position/altitude/speed/name to the FC purely for OSD/HUD display. It does not command navigation. There is no stock path from peer data into the follower's navigation controller.
 - **INAV already has a follow-me hook: `GCS NAV`.** With the FC in `NAV POSHOLD` + `GCS NAV`, an external consumer repeatedly writes special waypoint **#255** (the POSHOLD target) via `MSP_SET_WP` (#209). INAV flies to that moving point. This is the mechanism we drive.
 - **Modify FF firmware** because everything needed already lives in FF: the peer table, the follower's own position, and the MSP-writing plumbing (FF already frames and writes MSP to the FC, including GPS injection via `MSP2_COMMON_SET_RADAR_POS`). We add one outbound message and a small decision task; no extra UART or companion computer.
-- **FF's config today is compile-time only**, set via PlatformIO `build_flags` in `targets/*.ini`. There is no working runtime-persisted config and no config-write web endpoint anywhere in FF (verified — see §10.1). Making follow parameters web-configurable (§1.2) is new infrastructure, not a reuse of an existing mechanism, and depends on fixing a pre-existing EEPROM bug (§10.1) as a prerequisite.
+- **FF's config today is compile-time only**, set via PlatformIO `build_flags` in `targets/*.ini`. There is no working runtime-persisted config and no config-write web endpoint anywhere in FF (verified — see §10.2). Making follow parameters web-configurable (§1.2) is new infrastructure, not a reuse of an existing mechanism, and splits into two independently-shippable stages (§10.1): **live, in-memory editing** (no dependency on the EEPROM bug below) and **EEPROM persistence** of those edits, which does depend on fixing a pre-existing EEPROM bug (§10.2) as a prerequisite.
 
 ---
 
@@ -94,7 +104,8 @@ These values are dictated by INAV and must not be changed:
 - **action:** **1** (`MSP_NAV_STATUS_WAYPOINT_ACTION_WAYPOINT`, already `#define`d in `src/lib/MSP/MSP.h:410`). Setting action = 0 makes the message invalid.
 - **lat / lon:** `int32`, degrees × **1e7**.
 - **alt:** `int32`, **centimeters**. Home-relative when p3 bit0 = 0.
-- **p1, p2, p3, flag:** all **0** for our use (p1 doubles as "speed cm/s" per INAV but we don't set it; p3 bit0 = 0 ⇒ altitude relative to home; do not set AMSL).
+- **p1:** **heading, in whole degrees, or `0` for "don't update heading."** This is a special-cased meaning of `p1` scoped to **waypoint #255 only** — for ordinary mission waypoints (1–60), `p1` means cruise speed (cm/s) instead; do not read the two as the same field just because they share an offset. See §7.7 for the full mechanism and why this — not a second MSP message — is how nose-heading control is implemented.
+- **p2, p3, flag:** all **0** for our use (p3 bit0 = 0 ⇒ altitude relative to home; do not set AMSL).
 
 Payload layout (21 bytes, little-endian) — **this struct already exists in FF's codebase**, verbatim, at `src/lib/MSP/MSP.h:670-680` as `msp_set_wp_t` (packed):
 
@@ -105,7 +116,7 @@ Payload layout (21 bytes, little-endian) — **this struct already exists in FF'
 | 2      | lat             | int32  | latitude × 1e7                 |
 | 6      | lon             | int32  | longitude × 1e7                |
 | 10     | alt             | int32  | altitude in cm (home-relative) |
-| 14     | p1              | int16  | 0                               |
+| 14     | p1              | int16  | heading in degrees (1–360), or 0 for "no heading update" — see §7.7 |
 | 16     | p2              | int16  | 0                               |
 | 18     | p3              | int16  | 0                               |
 | 20     | flag            | uint8  | 0                               |
@@ -156,14 +167,17 @@ Ship #1 to get flying; move to #2 for the production behavior (unchanged recomme
 ```cpp
 // MSP_SET_WP (#209) — INAV follow-me special waypoint #255.
 // Requires NAV POSHOLD + GCS NAV active on the follower FC.
-void MSPManager::sendFollowWaypoint(int32_t lat_1e7, int32_t lon_1e7, int32_t alt_cm) {
+// headingDeg: 0 = don't update heading (unchanged from before §7.7); otherwise
+// 1-360, degrees. Caller is responsible for the 0->360 wrap (§7.7) — INAV's
+// own WP255 handler treats an incoming 0 as "no heading," not "due north."
+void MSPManager::sendFollowWaypoint(int32_t lat_1e7, int32_t lon_1e7, int32_t alt_cm, int16_t headingDeg) {
     msp_set_wp_t wp{};
     wp.waypointNumber = 255;
     wp.action = MSP_NAV_STATUS_WAYPOINT_ACTION_WAYPOINT; // must be 1
     wp.lat = lat_1e7;
     wp.lon = lon_1e7;
     wp.alt = alt_cm;         // home-relative, p3 bit0 = 0 below
-    wp.p1 = 0; wp.p2 = 0; wp.p3 = 0;
+    wp.p1 = headingDeg; wp.p2 = 0; wp.p3 = 0;
     wp.flag = 0;
     msp->command(MSP_SET_WP, &wp, sizeof(wp));
 }
@@ -205,7 +219,14 @@ void FollowManager::loop() {
     if (alt_cm < FOLLOW_MIN_ALT_CM) alt_cm = FOLLOW_MIN_ALT_CM;
 
     if (!follow_target_sane(p, tgt, alt_cm)) return;    // sanity bounds (§7.4)
-    mspManager->sendFollowWaypoint(tgt.lat_1e7, tgt.lon_1e7, alt_cm);
+
+    // Nose heading (§7.7) — independent of the position target above.
+    // Resolves to the 1-360 wire value directly (0 => FOLLOW_HEADING_OFF,
+    // "don't touch heading"); computed the same way regardless of whether
+    // the follower is a rotorcraft or fixed-wing (§7.7 — no craft-type branch).
+    int16_t headingDeg = follow_resolve_heading_deg(p, courseDeg);
+
+    mspManager->sendFollowWaypoint(tgt.lat_1e7, tgt.lon_1e7, alt_cm, headingDeg);
 }
 ```
 
@@ -331,9 +352,47 @@ Distinct from §7.4's vertical-separation rule, which governs the offset *relati
 - **`FOLLOW_MIN_ALT_M`** (config, §9): minimum home-relative altitude, in meters, that the follower will ever be commanded to. Human-facing (matches the web UI, mirrors the `FOLLOW_MIN_COURSE_SPEED` pattern above); converted to `FOLLOW_MIN_ALT_CM` (`= FOLLOW_MIN_ALT_M * 100`) at the comparison site in `alt_cm`'s home-relative centimeter frame.
 - **Applied as a clamp, not a reject.** If the fully-summed `alt_cm` (§6.2 — follower's own altitude + leader's relative altitude + configured vertical offset) falls below the floor, replace it with the floor value before emitting. Do **not** suppress the whole waypoint the way `follow_target_sane()`'s other checks do. The follower keeps tracking the leader's lateral (lat/lon) position and simply holds at the floor altitude instead; only the vertical component is overridden. Suppressing the entire waypoint instead would leave the follower holding its *last* commanded position indefinitely — not obviously safer than holding at a known, configured-safe minimum altitude, and inconsistent with every other term in §6.2's altitude sum being a plain additive quantity rather than a pass/fail gate.
 - **Ordering:** applied after all three altitude terms are summed (§6.2) and before `follow_target_sane()`'s other checks run, so the floor is the last word on the vertical component regardless of which upstream term (follower's own altitude, leader's relative altitude, or the configured vertical offset) caused the low value.
-- **Default: 3 m.** Low enough to stay out of the way of normal formation-flight altitudes, but enough to keep the follower clear of ground effect/small obstacles at most sites — a deliberately conservative, small default rather than a guess at "safe cruise altitude." Configurable per-site via the web UI (§10) since the appropriate floor height depends on local terrain/obstacles.
+- **Default: 3 m.** Low enough to stay out of the way of normal formation-flight altitudes, but enough to keep the follower clear of ground effect/small obstacles at most sites — a deliberately conservative, small default rather than a guess at "safe cruise altitude." Configurable per-site via the web UI (live editing in §10.3; persisted per-site via §10.4) since the appropriate floor height depends on local terrain/obstacles.
 - **Orthogonal to `FOLLOW_MIN_VSEP_M` (§7.4).** The vertical-separation rule prevents the follower's *configured slot* from sitting too close to the leader vertically. The altitude floor prevents the *final commanded altitude* from being too close to the ground, independent of the leader's own altitude or the configured offset. Both checks run; neither substitutes for the other.
 - **Does not replace FC-side protections.** This is a floor on what FF *commands* over MSP, not a substitute for INAV's own failsafe/RTH/ground-proximity behavior on the follower's FC — those remain the authoritative last line of defense (consistent with §8's "FC mode is authoritative" framing).
+
+### 7.7 Nose / heading control (NEW — addresses "nose doesn't track direction of travel / leader")
+
+For a fixed-wing follower, nose orientation and direction of travel are the same thing by construction (bank-to-turn flight). For a rotorcraft, they aren't — a multirotor can translate in any direction without yawing, so §6's position-only WP#255 stream leaves the nose wherever it last was (pilot stick input / whatever heading it happened to have), unrelated to the direction it's actually flying. This section adds independent control over the commanded heading.
+
+**Mechanism: `p1` on WP#255 itself, not a second MSP message.** Verified against INAV firmware source (`navigation.c`, `setWaypoint()`), the WP#255 special-case handler already reads `p1` as a heading:
+
+```c
+// INAV navigation.c, setWaypoint(), wpNumber == 255 branch
+if (wpData->p1 > 0 && wpData->p1 < 360) {
+    waypointUpdateFlags |= NAV_POS_UPDATE_HEADING;
+}
+setDesiredPosition(&wpPos.pos, DEGREES_TO_CENTIDEGREES(wpData->p1), waypointUpdateFlags);
+```
+
+This is purpose-built for exactly this use: `p1` (whole degrees) is written straight to `posControl.desiredState.yaw` when nonzero and in range. No second MSP command (e.g. `MSP_SET_HEAD`, #211), no additional INAV flight mode (e.g. `HEADING LOCK`) — the same `isGCSValid()` precondition that already gates the position stream (`ARMED`, `EST_TRUSTED`, GCS-assisted-nav enabled, `NAV_STATE_POSHOLD_3D_IN_PROGRESS`) also gates this. This supersedes an earlier design draft that proposed `MSP_SET_HEAD` + a `HEADING LOCK` box — rejected in favor of this because it needs one message instead of two and no new FC-side mode/AUX wiring.
+
+**`p1` range gotcha:** the firmware condition is `p1 > 0 && p1 < 360` — **`p1 == 0` is reserved and means "leave heading alone,"** not "point due north." A computed heading that rounds to exactly 0° must be sent as `360` instead, or that cycle's heading update is silently skipped. `follow_resolve_heading_deg()` (§6.2) owns this wrap; do not reintroduce a bare `% 360` at the call site.
+
+**`FOLLOW_HEADING_MODE` (config, §9), default `POINT_LEADER`:**
+
+| Mode | Commanded heading | Computation |
+|---|---|---|
+| `OFF` | none (`p1 = 0`, today's pre-§7.7 behavior) | — |
+| `COURSE` | direction of travel | `resolveCourseDeg()` (§6.2/§7.5) — the same leader-course value (with its low-speed/stationary fallback) already used to orient the slot itself |
+| `POINT_LEADER` | bearing toward the leader's live position | `GNSSManager::courseTo(leaderLoc)` (`GNSSManager.cpp:167-171`) — **already exists**, computes bearing from the follower's own current location to an arbitrary target; no new geometry code needed. Note this points at the *leader*, not at the computed slot target — correct for "look at the leader while flying beside them," which a firmware-side `NAV_POS_UPDATE_BEARING` (bearing-to-target-position) could not do, since the target position is the follower's own offset slot, not the leader. |
+| `FIXED` | a configured absolute compass heading | `FOLLOW_HEADING_DEG` (config, §9), used as-is |
+| `COURSE_RELATIVE` | a configured offset from the leader's live course | `resolveCourseDeg()` **+** `FOLLOW_HEADING_DEG` (config, §9), wrapped — same course input as `COURSE` mode, but with the configured degrees added as an offset rather than commanding the raw course itself |
+
+Default is `POINT_LEADER` rather than `OFF` or `COURSE`: it's the more generally useful behavior for formation flying (nose toward the other aircraft regardless of the follower's own slot/travel direction) and degrades gracefully — a follower flying directly behind/ahead the leader with `POINT_LEADER` ends up pointing roughly along its direction of travel anyway.
+
+**`FIXED` vs. `COURSE_RELATIVE`:** both consult the same `FOLLOW_HEADING_DEG` config value — the difference is the reference frame, not the parameter. `FIXED` commands that value as an absolute compass heading, unaffected by the leader's course (useful e.g. for a fixed camera/sensor orientation regardless of formation movement). `COURSE_RELATIVE` commands `resolveCourseDeg() + FOLLOW_HEADING_DEG`, so the nose holds a constant *angle relative to the direction of travel* — e.g. `+90` keeps the nose pointed 90° right of course continuously as the leader (and thus the track-relative slot, §7.1) turns, useful for line-abreast/echelon slots (§7.3) where "look outward/sideways relative to the formation's direction of travel" should track turns the way `FIXED`'s compass-locked value cannot. `FOLLOW_HEADING_DEG` is a single signed degrees value; its sign/range convention (`FIXED`: `[0, 360)` compass; `COURSE_RELATIVE`: any signed offset, wrapped the same way as every other computed heading in this section) is the same field regardless of which mode is active — only one mode is active at a time, so there's no ambiguity about which interpretation applies.
+
+**Fixed-wing followers: no special-casing.** `follow_resolve_heading_deg()` runs identically regardless of airframe — there is no craft-type branch, and none is added. This is deliberate, not an oversight:
+- Checked against the actual FW control loop (`navigation_fixedwing.c`, `updatePositionHeadingController_FW()`): outside of `NAV_COURSE_HOLD_MODE` and the FW landing glide/flare states — neither of which co-occurs with normal `GCS NAV` follow flight — the FW controller **ignores** `posControl.desiredState.yaw` entirely and self-computes its own bearing to the live position target (`calculateBearingToDestination(&virtualDesiredPosition)`). So under normal follow-me conditions, writing `p1` on a fixed-wing follower has **no effect on the flight path** — it's a safe no-op, not a hazard.
+- One cosmetic side effect: `desiredState.yaw` also feeds `navDesiredHeading` (`navigation.c:4434`), a telemetry/OSD "nav target heading" field — so a fixed-wing follower's OSD could transiently display our computed heading as a "nav target" even though it isn't steering to it. Cosmetic only.
+- §1.3 currently scopes followers to multirotors only; fixed-wing followers are out of scope for this iteration regardless of §7.7. Not special-casing the heading write here is what keeps §7.7 correct without rework if/when that scope changes, rather than adding craft-type logic now for a case that's already excluded.
+- Not verified: whether some INAV build/config could have `NAV_COURSE_HOLD_MODE` active concurrently with `GCS NAV` follow — an unusual combination, flagged in §13 as worth confirming empirically rather than assumed impossible.
 
 ---
 
@@ -349,7 +408,7 @@ Distinct from §7.4's vertical-separation rule, which governs the offset *relati
 
 ## 9. Configuration Summary (all keys)
 
-These are the parameters that exist both as compile-time defaults (`build_flags`, per §2) **and** as runtime-editable values via the web UI (§10) — the web UI is the primary way these get changed after initial flashing; the compile-time values only matter as factory defaults / first-boot seed.
+These are the parameters that exist both as compile-time defaults (`build_flags`, per §2) **and** as runtime-editable values via the web UI (§10) — the web UI is the primary way these get changed after initial flashing. Runtime edits take effect immediately (in-memory) but, per §10's two-stage design, only survive reboot once explicitly persisted via the commit action (§10.4); the compile-time values matter as factory defaults / first-boot (or post-reset) EEPROM seed.
 
 Geometry (§7.3): `FOLLOW_OFS_LONG_M`, `FOLLOW_OFS_LAT_M`, `FOLLOW_OFS_VERT_M`, or grid `FOLLOW_SLOT_LONG/LAT/VERT` + `FOLLOW_GAP_LONG_M/LAT_M/VERT_M` (default slot: `BEHIND`/`CENTER`/`ABOVE`, i.e. `chase-high` — testable with the leader on the ground).
 
@@ -363,43 +422,62 @@ Behavior / safety:
 - `FOLLOW_MIN_COURSE_SPEED` (m/s; converted to cm/s at comparison time against `peer->gps.groundSpeed` — see §7.5), `FOLLOW_STATIONARY_MODE` = `HOLD_COURSE` | `WORLD_FRAME`
 - `FOLLOW_MAX_TARGET_DIST_M` (runtime sanity bound)
 - `FOLLOW_MIN_ALT_M` (default **3 m**, home-relative; converted to `FOLLOW_MIN_ALT_CM` at comparison time — absolute floor clamping the final commanded altitude, independent of `FOLLOW_MIN_VSEP_M`; see §7.6)
+- `FOLLOW_HEADING_MODE` = `OFF` | `COURSE` | `POINT_LEADER` | `FIXED` | `COURSE_RELATIVE` (default **`POINT_LEADER`**) — commanded nose heading, sent via WP#255's `p1` (§7.7); applies uniformly to rotorcraft and fixed-wing followers, no craft-type distinction (§7.7)
+- `FOLLOW_HEADING_DEG` (degrees; only consulted when `FOLLOW_HEADING_MODE = FIXED` or `COURSE_RELATIVE`; absolute compass heading for `FIXED`, offset added to the leader's live course for `COURSE_RELATIVE` — same field, mode-dependent meaning; §7.7)
 
 ---
 
 ## 10. Web UI Configuration (Runtime) (NEW — addresses "follow parameters configurable via web UI")
 
-### 10.1 Why this is new work, not a reuse
-Verified against source: FF's config today is **compile-time only in practice**.
+### 10.1 Two-stage design: live edit vs. persist
+Web UI configurability splits into two independently-shippable stages, not one combined "edit + auto-persist" flow:
+
+1. **Live, in-memory config** (§10.3): edits made in the web UI take effect immediately — the running `FollowManager` picks them up on its next `loop()` cycle — but live only in RAM. A reboot always reverts to the compile-time `build_flags` defaults. This stage has **no dependency on EEPROM or the `ConfigHandler` bug** (§10.2), so it can ship and be used for bench/flight tuning on its own.
+2. **EEPROM persistence** (§10.4): a distinct, explicit "commit"/"save permanently" action flushes whatever is currently in the in-memory struct to EEPROM, so it survives reboot. This stage **does** depend on fixing the pre-existing `ConfigHandler` reset bug (§10.2) first.
+
+Rationale: the two stages have genuinely different risk profiles and prerequisites (RAM writes are cheap and safe to ship immediately; EEPROM writes are rate-limited, wear-sensitive, and blocked on a fix to shared, non-follow-specific config code). Decoupling them means the live-editing half of the "web UI configurability" requirement (§1.2) doesn't have to wait on the EEPROM prerequisite, and the two halves can be tested and shipped separately.
+
+### 10.2 Why persistence specifically is new work, not a reuse
+Verified against source: FF's config today is **compile-time only in practice**, and nothing existing can be reused for EEPROM persistence without a fix first.
 - `src/main.h` defines a global `config_t cfg` with a handful of unrelated fields (`force_gs`, `lora_nodes`, `slot_spacing`, `lora_timing_delay`, `msp_after_tx_delay`, `display_enable`) — no follow-related fields, and no generic key/value or JSON layer.
-- `config_init()` in `src/lib/ConfigHandler.cpp:27-46` reads `cfg` from EEPROM but then **unconditionally overwrites it with hardcoded defaults** every boot, due to `if (true || cfg.version != VERSION_CONFIG || forcedefault)` (`ConfigHandler.cpp:37`) — a literal `true ||` that short-circuits the version check. **Any EEPROM-persisted edit to `cfg` is discarded on every boot today.** This is a pre-existing bug, unrelated to follow mode, but it directly blocks persisting follow config the same way — **fixing it (removing `true ||`) is a prerequisite for this section**, not optional polish.
-- There is no HTTP endpoint anywhere in `WiFiManager.cpp` that writes/persists config. All existing `POST` endpoints are either fire-and-forget actions (`/peermanager/spoof`, `/radiomanager/radio_set_enabled`, `/system/reboot`) or spoof/debug setters that live only in RAM (`/gnssmanager/spoof`).
+- `config_init()` in `src/lib/ConfigHandler.cpp:27-46` reads `cfg` from EEPROM but then **unconditionally overwrites it with hardcoded defaults** every boot, due to `if (true || cfg.version != VERSION_CONFIG || forcedefault)` (`ConfigHandler.cpp:37`) — a literal `true ||` that short-circuits the version check. **Any EEPROM-persisted edit to `cfg` is discarded on every boot today.** This is a pre-existing bug, unrelated to follow mode, but it directly blocks persisting follow config the same way — **fixing it (removing `true ||`) is a prerequisite for §10.4 (persistence)**, not optional polish. It is **not** a prerequisite for §10.3 (live, in-memory config), which never touches EEPROM.
+- There is no HTTP endpoint anywhere in `WiFiManager.cpp` that writes/persists config. All existing `POST` endpoints are either fire-and-forget actions (`/peermanager/spoof`, `/radiomanager/radio_set_enabled`, `/system/reboot`) or spoof/debug setters that live only in RAM (`/gnssmanager/spoof`) — the RAM-only pattern of `/gnssmanager/spoof` is actually the closest existing precedent for §10.3's live-edit endpoint.
 - `html/main.js` has a `Settings()` component (lines ~163-199) that *looks* like a config UI (fields for `log_enabled`, `log_level`, `brightness`, `device_name`) but is vestigial: its save handler issues a `GET /system/status` with the JSON body **commented out**, and none of those fields exist in the actual `/system/status` response. It is not a usable pattern to extend as-is, though its layout/component structure is a reasonable starting point for a new panel.
 
-### 10.2 Design
-- **New `FollowManager` config struct**, holding every key in §9, distinct from the existing unrelated `config_t cfg` (don't overload that struct — it's small, unrelated, and already fragile per the bug above). Persist it via the same EEPROM primitives `config_save()`/`config_init()` use (`ConfigHandler.cpp`), in its own EEPROM region (offset after `cfg`'s footprint), once the `true ||` bug is fixed.
+### 10.3 Design — live, in-memory config
+- **New `FollowManager` runtime config struct**, holding every key in §9, distinct from the existing unrelated `config_t cfg` (don't overload that struct — it's small, unrelated, and already fragile per §10.2's bug). RAM-only: seeded from the compile-time `build_flags` defaults at boot, mutated in place by writes below. No EEPROM interaction at this stage.
 - **New endpoints in `WiFiManager.cpp`**, following the existing per-manager pattern exactly:
   - `GET /followmanager/config` — returns current config as JSON (all §9 keys, resolved values — i.e. reflects grid→canonical expansion so the UI can show both views).
-  - `POST /followmanager/config` — accepts JSON body with any subset of §9 keys, validates (including the §7.4 minimum-separation check and the §7.6 altitude-floor value being a sane non-negative number, server-side, not just client-side), updates the in-RAM struct, calls `config_save()`-equivalent to persist, and returns the resolved config back (so the UI can confirm what actually took effect after validation).
+  - `POST /followmanager/config` — accepts JSON body with any subset of §9 keys, validates (including the §7.4 minimum-separation check and the §7.6 altitude-floor value being a sane non-negative number, server-side, not just client-side), updates the in-RAM struct only, and returns the resolved config back (so the UI can confirm what actually took effect after validation). Does **not** touch EEPROM — see §10.4 for that.
   - `GET /followmanager/status` — separate from config: live state for the panel to show while flying/bench-testing — current `PeerLock` state (`IDLE`/`ACQUIRING`/`LOCKED`/`LOCKED_HOLDING`), which peer id/name is locked (if any), gate active/inactive, and the last computed target (for the bench test in §11.1).
-- **New web UI panel**, modeled on the existing `Settings()` component's structure in `html/main.js` but wired to the new endpoints (not the dead `/system/status` path): friendly-grid dropdowns (§7.3) as the primary editing surface with an "advanced" toggle to edit raw `FOLLOW_OFS_*_M`, trigger-mode selector, and a target-peer selector populated live from `/peermanager/status` (so the pilot can pick a specific visible peer by name instead of only `FIRST_ACTIVE`) — this doubles as the escape hatch referenced in §6.3's "user changes a setting" transition.
-- **Resolution order:** compile-time `build_flags` values are the factory defaults used only to seed EEPROM the first time (or after a config reset); once the web UI has saved a value, the persisted value wins on every subsequent boot. This mirrors how `cfg`/`config_save()` would work correctly once §10.1's bug fix lands.
+- **New web UI panel**, modeled on the existing `Settings()` component's structure in `html/main.js` but wired to the new endpoints (not the dead `/system/status` path): friendly-grid dropdowns (§7.3) as the primary editing surface with an "advanced" toggle to edit raw `FOLLOW_OFS_*_M`, trigger-mode selector, and a target-peer selector populated live from `/peermanager/status` (so the pilot can pick a specific visible peer by name instead of only `FIRST_ACTIVE`) — this doubles as the escape hatch referenced in §6.3's "user changes a setting" transition. The panel visibly indicates edits are session-only (e.g. a banner/badge) until §10.4's persistence lands and a commit succeeds. No debounce needed on this endpoint — an in-RAM write is cheap enough to fire on every change; debounce is only introduced in §10.4 where it guards the EEPROM-write path.
+- **Resolution order at this stage:** compile-time `build_flags` values seed the in-memory struct at every boot (there is no persisted value yet to compete with); once §10.4 lands, a persisted EEPROM value — if present — wins instead.
+- **§7.7's `FOLLOW_HEADING_MODE`/`FOLLOW_HEADING_DEG` are §9 keys like any other** — no separate endpoint or special-cased UI flow. They're read/written through the same `GET`/`POST /followmanager/config` pair and appear in the same panel as a mode dropdown (`OFF`/`COURSE`/`POINT_LEADER`/`FIXED`/`COURSE_RELATIVE`) plus a single degrees field shown whenever `FIXED` or `COURSE_RELATIVE` is selected, following the existing panel's conditional-field pattern (the grid-vs-advanced offset toggle already does this). The field's label/units should change with the mode (e.g. "Heading (absolute °)" for `FIXED` vs. "Heading offset from course (°)" for `COURSE_RELATIVE`) so the same underlying value isn't misread as the wrong frame — this is a UI-copy concern, not a data-model one, since both modes share `FOLLOW_HEADING_DEG`.
 
-### 10.3 Non-goals for this section
+### 10.4 Design — EEPROM persistence
+**Depends on:** §10.2's `ConfigHandler` bug fix, and §10.3's in-memory struct already existing (this stage persists it, it doesn't introduce a new one).
+- Persist the §10.3 struct via the same EEPROM primitives `config_save()`/`config_init()` use (`ConfigHandler.cpp`), in its own EEPROM region (offset after `cfg`'s footprint).
+- **New endpoint:** `POST /followmanager/commit` — takes no body (or an empty one); flushes whatever is currently in the §10.3 in-memory struct to EEPROM. Deliberately separate from `POST /followmanager/config` (§10.3) so a live edit and a "make it permanent" action are two distinct, explicit steps — a pilot can tune live all session without ever touching EEPROM, and only commits when satisfied. Rate-limited/debounced server-side (e.g. reject or coalesce a burst of rapid commit calls) so repeated clicks or an automated caller can't hammer EEPROM with writes — this is where the debounce concern from earlier drafts of this spec actually applies (see §13).
+- **New web UI control:** a "Save permanently" button/action distinct from §10.3's live-apply controls, wired to `/followmanager/commit`. Reflects persisted-vs-unsaved state (e.g. disabled once the in-memory struct already matches the last successful commit) and clears §10.3's "session-only" banner once a commit succeeds.
+- **Resolution order once this stage exists:** compile-time `build_flags` values are the factory defaults used only to seed EEPROM the first time (or after a config reset); once `/followmanager/commit` has been called at least once, the persisted value wins on every subsequent boot, overriding the compile-time seed. This mirrors how `cfg`/`config_save()` would work correctly once §10.2's bug fix lands.
+
+### 10.5 Non-goals for this section
 - No auth on these endpoints, consistent with the rest of FF's local-AP-only web UI (`WiFi.softAP`, no credentials checked on other endpoints either) — not introducing a new security posture here.
 - No remote/cloud config sync. Persistence is local EEPROM only, same trust boundary as the rest of FF.
+- No automatic/implicit persistence. §10.3's live edits never silently reach EEPROM on their own (e.g. on a timer, or on gate-deactivate) — only the explicit commit action in §10.4 does.
 
 ---
 
 ## 11. Files / Modules to Change (feeds the plan)
 
-1. **`src/lib/MSP/MSPManager.{h,cpp}`** — add `sendFollowWaypoint()` using the existing `msp_set_wp_t` + `MSP::command()` (§6.1, not a hand-rolled frame); add `MSP_ALTITUDE` polling + cached `local_altitude_cm()` (§5[B] — confirmed new, not reuse); extend the existing `getActiveModes()`-based state read to expose a "GCS NAV active" accessor (§5[C] — one-line addition to existing code); if using AUX trigger, add new `MSP_RC` polling + accessor.
+1. **`src/lib/MSP/MSPManager.{h,cpp}`** — add `sendFollowWaypoint()` using the existing `msp_set_wp_t` + `MSP::command()` (§6.1, not a hand-rolled frame; §7.7 extends its signature with `headingDeg`); add `MSP_ALTITUDE` polling + cached `local_altitude_cm()` (§5[B] — confirmed new, not reuse); extend the existing `getActiveModes()`-based state read to expose a "GCS NAV active" accessor (§5[C] — one-line addition to existing code); if using AUX trigger, add new `MSP_RC` polling + accessor.
 2. **`src/lib/Peers/PeerManager.{h,cpp}`** — expose a lookup-by-id accessor (peer table is index-based today, not id-keyed — needed for §6.3's lock-by-id) and a `peer_is_stale(peer_t*)` helper using `peer->updated` (§8). No struct changes needed — `peer->gps.lat/lon/groundCourse/groundSpeed` and `peer->relalt` already carry what's needed (§5[A]).
-3. **`follow` (new module, e.g. `src/lib/Follow/FollowManager.{h,cpp}`)** — `loop()` (§6.2, including the §7.6 altitude-floor clamp), `PeerLock` state machine (§6.3), `follow_resolve_offset()`, `slotToLatLon()`, `follow_switch_active()`, `follow_target_sane()`, plus a `statusJson()`/config accessors for §10's endpoints.
+3. **`follow` (new module, e.g. `src/lib/Follow/FollowManager.{h,cpp}`)** — `loop()` (§6.2, including the §7.6 altitude-floor clamp and the §7.7 heading resolve/emit), `PeerLock` state machine (§6.3), `follow_resolve_offset()`, `slotToLatLon()`, `follow_switch_active()`, `follow_target_sane()`, `follow_resolve_heading_deg()` (§7.7 — reuses the existing `resolveCourseDeg()` for `COURSE` mode and `GNSSManager::courseTo()` for `POINT_LEADER`, no new geometry primitive needed), plus a `statusJson()`/config accessors for §10's endpoints.
 4. **`src/main.cpp`** — register `FollowManager::getSingleton()->loop()` in the main `loop()` sequence, after `PeerManager`/`GNSSManager`/`MSPManager`, gated the same way `MSPManager` is (§3).
-5. **`src/lib/ConfigHandler.cpp`** — fix the `if (true || ...)` bug (`ConfigHandler.cpp:37`) as a prerequisite for §10's persistence to work at all; this is a pre-existing defect, worth flagging to the team as possibly wanted/known before "fixing" it out from under other config.
-6. **`src/lib/WiFi/WiFiManager.cpp`** — add `/followmanager/config` (GET+POST) and `/followmanager/status` (GET) endpoints (§10.2), following the existing per-manager handler pattern; optionally extend `/peermanager/spoof` or add a parametrized alternative (lat/lon/course, modeled on `/gnssmanager/spoof`'s param handling) to support §11.1's bench tests.
-7. **`html/main.js`** (or a new component file) — new Follow config panel (§10.2), replacing/ignoring the vestigial `Settings()` component's dead save path.
-8. **Config / target `.ini` files** — add all §9 keys as `build_flags` defaults (factory-default seed values for §10's first-boot EEPROM init).
+5. **`src/lib/ConfigHandler.cpp`** — fix the `if (true || ...)` bug (`ConfigHandler.cpp:37`) as a prerequisite for §10.4's persistence to work at all (not needed for §10.3's live-edit stage); this is a pre-existing defect, worth flagging to the team as possibly wanted/known before "fixing" it out from under other config.
+6. **`src/lib/WiFi/WiFiManager.cpp`** — add `/followmanager/config` (GET+POST, in-memory only, §10.3) and `/followmanager/status` (GET) endpoints first, following the existing per-manager handler pattern; add `/followmanager/commit` (POST, EEPROM write, §10.4) as a later, independent addition once item 5 lands. Optionally extend `/peermanager/spoof` or add a parametrized alternative (lat/lon/course, modeled on `/gnssmanager/spoof`'s param handling) to support §11.1's bench tests.
+7. **`html/main.js`** (or a new component file) — new Follow config panel wired to the live-edit endpoints first (§10.3), with a "Save permanently" control added once `/followmanager/commit` exists (§10.4); replaces/ignores the vestigial `Settings()` component's dead save path. §7.7 adds a heading-mode dropdown + conditional fixed-degrees field to this same panel — no new panel/endpoint.
+8. **Config / target `.ini` files** — add all §9 keys as `build_flags` defaults (factory-default seed values for §10's first-boot EEPROM init), including §7.7's `FOLLOW_HEADING_MODE`/`FOLLOW_HEADING_FIXED_DEG`.
 
 ---
 
@@ -417,8 +495,18 @@ Verify:
 6. Freshness guard: killing the spoof stops emission within `FOLLOW_PEER_TIMEOUT_MS`.
 7. Geometry guards: a sub-minimum-separation config refuses to arm (both firmware-side and web-UI-side, §7.4); stationary-leader fallback behaves as configured — spoof the leader at ~1.5 m/s and ~3 m/s bracketing the `FOLLOW_MIN_COURSE_SPEED` default and confirm the fallback triggers/doesn't at the correct threshold (the cm/s-vs-m/s comparison in §7.5 is easy to get silently wrong).
 8. Altitude accuracy: with two real GPS units (not spoofed) at a known, measured height difference, confirm the commanded `alt_cm` lands within `FOLLOW_MIN_VSEP_M` of the intended offset — quantifies the real-world GPS-vertical-error budget the 13 m default (§7.4) is meant to absorb; §12.1 item 4 above only checks `local_altitude_cm()` in isolation, not the combined leader+follower altitude math.
-9. **Web UI config (§10):** editing a preset/offset/trigger-mode/target-peer in the web panel, saving, and rebooting the follower confirms the value persisted (survives reboot) rather than reverting to compile-time defaults. Confirm changing `FOLLOW_TARGET_PEER` while the gate is active forces a re-acquire per §6.3.
+9. **Web UI config, live edit only (§10.3):** editing a preset/offset/trigger-mode/target-peer in the web panel takes effect immediately (watch §2's status endpoint/OSD); rebooting the follower **without** committing confirms the value reverts to the compile-time default (expected — nothing has been persisted yet). Confirm changing `FOLLOW_TARGET_PEER` while the gate is active forces a re-acquire per §6.3.
+9a. **Web UI config, persistence (§10.4):** repeat a live edit, then invoke the "Save permanently" commit action; rebooting the follower this time confirms the value survived (didn't revert to compile-time default). Confirm rapid repeated commits don't produce excessive EEPROM writes (the rate-limit/debounce from §10.4 actually engages).
 10. **Altitude floor (§7.6):** with a `BELOW` vertical slot (or `ABOVE`/`LEVEL` plus a spoofed leader at/near the follower's home altitude), drive the leader's altitude down until the summed `alt_cm` (§6.2) would go at or below `FOLLOW_MIN_ALT_M`. Confirm the commanded altitude never drops below the floor, and — critically — that the waypoint is still emitted with the floored altitude and correct lat/lon (i.e. this clamps, it does not silently stop emission like a `follow_target_sane()` rejection would). Also confirm `FOLLOW_MIN_VSEP_M` (§7.4) and `FOLLOW_MIN_ALT_M` (§7.6) are independently exercisable — a config that satisfies one should not be assumed to satisfy the other.
+11. **Nose heading (§7.7), per mode, read back via `MSP_WP` (#254) or INAV Configurator's WP list / OSD heading indicator:**
+    - `OFF`: confirm `p1 == 0` on every emitted WP#255 (byte-identical to pre-§7.7 behavior).
+    - `COURSE`: spoof the leader on a known course; confirm commanded heading matches `resolveCourseDeg()`'s value, including its low-speed/stationary-fallback behavior (§7.5) — a leader below `FOLLOW_MIN_COURSE_SPEED` should hold the last-valid course, not jitter.
+    - `POINT_LEADER`: with the follower and spoofed leader at known, distinct lat/lons, confirm the commanded heading matches the true bearing follower→leader, independent of the follower's own slot/travel direction (verify specifically in a lateral, e.g. `line-abreast`, slot where course and bearing-to-leader clearly differ).
+    - `FIXED`: confirm the commanded heading equals the configured `FOLLOW_HEADING_DEG` regardless of leader position/course.
+    - `COURSE_RELATIVE`: spoof the leader on a known, *changing* course (e.g. a slow turn) with a nonzero `FOLLOW_HEADING_DEG` (e.g. `+90`); confirm the commanded heading tracks `resolveCourseDeg() + FOLLOW_HEADING_DEG` at every sample as the leader turns — i.e. the offset stays constant relative to the direction of travel, not fixed to a compass bearing the way `FIXED` would be. Also confirm it inherits `COURSE`'s low-speed/stationary-fallback behavior (§7.5) since it's built on the same `resolveCourseDeg()` call.
+    - **`p1 == 0` edge case:** drive a scenario where the computed heading is exactly 0°/360° (e.g. leader course due north for `COURSE` mode, or a `COURSE_RELATIVE` offset that wraps to exactly 0) and confirm the emitted `p1` is `360`, not `0` — confirm the FC actually updates its heading target that cycle rather than silently skipping it (the firmware-side gotcha documented in §7.7).
+    - **Fixed-wing no-op (if a fixed-wing bench unit is available):** confirm a nonzero `p1` has no observable effect on the FW's flight path under normal `GCS NAV`+`NAV POSHOLD` follow conditions, consistent with §7.7's firmware-source finding; note if the OSD's nav-heading indicator shows the commanded value regardless (expected, cosmetic).
+    - Confirm `FOLLOW_HEADING_MODE`/`FOLLOW_HEADING_DEG` are live-editable via the web UI (§10.3) the same way every other §9 key already is, and revert to compile-time default on reboot pre-persistence, same as §12.1 item 9.
 
 ### 12.2 Flight (progressive, open area, big margins)
 1. Trail slot, large horizontal gap, generous vertical separation, low speed. Manual-override switch tested first.
@@ -432,7 +520,8 @@ Verify:
 - No `MSP_SET_WP` is ever emitted with stale, out-of-bounds, or mis-scaled coordinates.
 - The follower is never commanded to a home-relative altitude below `FOLLOW_MIN_ALT_M`, regardless of the leader's altitude, a descending/landing leader, or the configured vertical offset — the altitude is clamped to the floor, not treated as a reason to withhold the waypoint (§7.6).
 - With multiple peers visible, the follower always locks to exactly one (the first detected, or the explicitly configured id) and never auto-retargets to another on loss.
-- All follow parameters are editable and persist via the web UI without a reflash.
+- All follow parameters are editable live via the web UI without a reflash (§10.3); explicitly committed values persist across reboot without a reflash (§10.4). Live edits that are never committed are expected to revert to compile-time defaults on reboot — that is correct behavior, not a bug.
+- The follower's commanded nose heading always matches the configured `FOLLOW_HEADING_MODE` (§7.7) — direction of travel, bearing to the leader, or a fixed heading — and `OFF` reproduces pre-§7.7 wire behavior exactly (`p1 == 0` always).
 
 ---
 
@@ -443,6 +532,7 @@ Resolved by source review (kept here for traceability, not action items): PeerMa
 Still open:
 - **`peer->id` reuse edge case (§6.3):** confirm via bench/multi-peer testing whether a dropped-and-reassigned LoRa slot can plausibly happen within a `LOCKED_HOLDING` window in practice, and whether the name-match mitigation is sufficient or a stronger identity check is needed.
 - **Altitude-frame mixing (§6.2, §7.4):** `alt_cm` sums the follower's baro/GPS-fused home-relative estimate with a raw-GPS-only delta from the peer link, because the leader only broadcasts raw GPS telemetry (§1.3 rules out leader-side changes). `FOLLOW_MIN_VSEP_M`'s revised 13 m default is a mitigation (absorb ~8 m of worst-case GPS vertical error), not a fix to the underlying measurement. A future leader-side enhancement — broadcasting the leader's own `MSP_ALTITUDE`-derived home-relative altitude instead of relying on the raw-GPS delta — would remove this error source entirely, but is out of scope for this iteration per §1.3. Worth quantifying with real two-aircraft altitude testing (§12.1 item 8) before deciding whether it's worth pursuing.
-- **EEPROM wear from frequent web UI saves (§10):** if the panel encourages live-tweaking-while-hovering (e.g. dragging a slider), debounce saves rather than writing on every change, to avoid excessive EEPROM write cycles.
-- **Whether the `config_init()` `true ||` bug (§10.1) is intentional/known** — confirm with the team before removing it, in case something currently depends on config always resetting (e.g. a support workaround).
+- **EEPROM wear from frequent commits (§10.4):** resolved by the two-stage split — live edits (§10.3) never touch EEPROM regardless of how often the panel fires, so this concern is now scoped entirely to the explicit commit action, which is server-side rate-limited/debounced. Still to confirm empirically: whether the chosen rate-limit window is generous enough for normal "tune, then save" pilot workflow without feeling throttled.
+- **Whether the `config_init()` `true ||` bug (§10.2) is intentional/known** — confirm with the team before removing it, in case something currently depends on config always resetting (e.g. a support workaround). This only blocks §10.4 (persistence); §10.3 (live editing) can ship and be used independently of this decision.
 - Whether an existing FF branch/PR already targets a follow feature or the config-write endpoint independently (check the project's #development channel before building) — a repo-wide grep and recent branch/commit review found no such work in progress as of this spec's writing, but that can change.
+- **§7.7 heading control:** whether any real INAV build/config can have `NAV_COURSE_HOLD_MODE` active concurrently with the `GCS NAV`+`NAV POSHOLD` follow gate — if so, the FW controller would read our commanded `p1` as a hard target bearing instead of ignoring it (§7.7's "ignored under normal conditions" finding assumes this doesn't happen). Not expected in practice, but not exercised on real hardware yet — worth a bench check if/when a fixed-wing follower is tested, even though fixed-wing followers remain out of scope (§1.3) for this iteration otherwise.

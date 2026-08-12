@@ -289,50 +289,17 @@ void handleSystemStatus(AsyncWebServerRequest *request)
 void handleFollowManagerConfigPost(AsyncWebServerRequest *request)
 {
     FollowRuntimeConfig cfg = FollowManager::getSingleton()->getConfig();
-    bool gridTouched = false;
-    bool rawTouched = false;
 
     auto strParam = [&](const char *name) {
         return request->getParam(name, true)->value();
     };
 
-    if (request->hasParam("slotLong", true)) {
-        String v = strParam("slotLong");
-        if (v == "AHEAD") cfg.slotLong = FOLLOW_LONG_AHEAD;
-        else if (v == "CENTER") cfg.slotLong = FOLLOW_LONG_CENTER;
-        else if (v == "BEHIND") cfg.slotLong = FOLLOW_LONG_BEHIND;
-        else { request->send(400, "text/plain", "invalid slotLong (want AHEAD/CENTER/BEHIND)"); return; }
-        gridTouched = true;
-    }
-    if (request->hasParam("slotLat", true)) {
-        String v = strParam("slotLat");
-        if (v == "LEFT") cfg.slotLat = FOLLOW_LAT_LEFT;
-        else if (v == "CENTER") cfg.slotLat = FOLLOW_LAT_CENTER;
-        else if (v == "RIGHT") cfg.slotLat = FOLLOW_LAT_RIGHT;
-        else { request->send(400, "text/plain", "invalid slotLat (want LEFT/CENTER/RIGHT)"); return; }
-        gridTouched = true;
-    }
-    if (request->hasParam("slotVert", true)) {
-        String v = strParam("slotVert");
-        if (v == "BELOW") cfg.slotVert = FOLLOW_VERT_BELOW;
-        else if (v == "LEVEL") cfg.slotVert = FOLLOW_VERT_LEVEL;
-        else if (v == "ABOVE") cfg.slotVert = FOLLOW_VERT_ABOVE;
-        else { request->send(400, "text/plain", "invalid slotVert (want BELOW/LEVEL/ABOVE)"); return; }
-        gridTouched = true;
-    }
-    if (request->hasParam("gapLongM", true)) { cfg.gapLongM = strParam("gapLongM").toDouble(); gridTouched = true; }
-    if (request->hasParam("gapLatM", true)) { cfg.gapLatM = strParam("gapLatM").toDouble(); gridTouched = true; }
-    if (request->hasParam("gapVertM", true)) { cfg.gapVertM = strParam("gapVertM").toDouble(); gridTouched = true; }
-
-    if (request->hasParam("ofsLongM", true)) { cfg.ofsLongM = strParam("ofsLongM").toDouble(); rawTouched = true; }
-    if (request->hasParam("ofsLatM", true)) { cfg.ofsLatM = strParam("ofsLatM").toDouble(); rawTouched = true; }
-    if (request->hasParam("ofsVertM", true)) { cfg.ofsVertM = strParam("ofsVertM").toDouble(); rawTouched = true; }
-
-    // Advanced (raw) params win if both surfaces are posted in the same
-    // request; otherwise whichever surface was actually touched selects the
-    // mode (spec §7.3's two editing surfaces).
-    if (rawTouched) cfg.offsetMode = FOLLOW_OFFSET_MODE_RAW;
-    else if (gridTouched) cfg.offsetMode = FOLLOW_OFFSET_MODE_GRID;
+    // Canonical track-relative offset (spec §7.3) — the AHEAD/BEHIND/etc.
+    // "friendly grid" is a client-side view over these signed meters
+    // (html/follow.js); the server only ever sees this one representation.
+    if (request->hasParam("ofsLongM", true)) cfg.ofsLongM = strParam("ofsLongM").toDouble();
+    if (request->hasParam("ofsLatM", true)) cfg.ofsLatM = strParam("ofsLatM").toDouble();
+    if (request->hasParam("ofsVertM", true)) cfg.ofsVertM = strParam("ofsVertM").toDouble();
 
     if (request->hasParam("targetPeer", true)) cfg.targetPeer = (uint8_t)strParam("targetPeer").toInt();
     if (request->hasParam("emitHz", true)) cfg.emitHz = (uint16_t)strParam("emitHz").toInt();
@@ -343,13 +310,6 @@ void handleFollowManagerConfigPost(AsyncWebServerRequest *request)
     if (request->hasParam("maxTargetDistM", true)) cfg.maxTargetDistM = strParam("maxTargetDistM").toDouble();
     if (request->hasParam("minAltM", true)) cfg.minAltM = strParam("minAltM").toDouble();
     if (request->hasParam("minCourseSpeed", true)) cfg.minCourseSpeed = strParam("minCourseSpeed").toDouble();
-
-    if (request->hasParam("stationaryMode", true)) {
-        String v = strParam("stationaryMode");
-        if (v == "HOLD_COURSE") cfg.stationaryMode = FOLLOW_STATIONARY_HOLD_COURSE;
-        else if (v == "WORLD_FRAME") cfg.stationaryMode = FOLLOW_STATIONARY_WORLD_FRAME;
-        else { request->send(400, "text/plain", "invalid stationaryMode (want HOLD_COURSE/WORLD_FRAME)"); return; }
-    }
 
     // Nose heading (spec §7.7) — headingDeg is shared between FIXED
     // (absolute) and COURSE_RELATIVE (offset from course); which

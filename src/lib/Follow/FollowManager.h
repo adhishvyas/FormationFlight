@@ -26,15 +26,6 @@ struct FollowTarget {
     int32_t lon_1e7;
 };
 
-// Which of the two editing surfaces (spec §7.3) currently governs
-// resolveOffset(): the friendly grid (slot enums + gaps) or the advanced
-// raw canonical meters. Explicit rather than inferred from "is anything
-// nonzero" so a raw (0,0,0) offset is representable and unambiguous.
-enum FollowOffsetMode {
-    FOLLOW_OFFSET_MODE_GRID = 0,
-    FOLLOW_OFFSET_MODE_RAW = 1,
-};
-
 // Runtime-editable mirror of every §9 key except FOLLOW_TRIGGER_MODE/
 // FOLLOW_AUX_* (AUX trigger is Phase 2b, not implemented — trigger mode
 // stays compile-time-only and is reported read-only in configJson()).
@@ -43,20 +34,13 @@ enum FollowOffsetMode {
 // POST /followmanager/config (Phase 3B), lost on reboot until Phase 4
 // adds EEPROM persistence.
 struct FollowRuntimeConfig {
-    FollowOffsetMode offsetMode = FOLLOW_OFFSET_MODE_GRID;
-
-    FollowLongSlot slotLong = FOLLOW_SLOT_LONG;
-    FollowLatSlot slotLat = FOLLOW_SLOT_LAT;
-    FollowVertSlot slotVert = FOLLOW_SLOT_VERT;
-    double gapLongM = FOLLOW_GAP_LONG_M;
-    double gapLatM = FOLLOW_GAP_LAT_M;
-    double gapVertM = FOLLOW_GAP_VERT_M;
-
-    // Advanced/raw canonical offsets (spec §7.3) — only take effect when
-    // offsetMode == FOLLOW_OFFSET_MODE_RAW.
-    double ofsLongM = 0.0;
-    double ofsLatM = 0.0;
-    double ofsVertM = 0.0;
+    // Canonical track-relative offset (spec §7.3), meters. The
+    // AHEAD/BEHIND/LEFT/RIGHT/ABOVE/BELOW "friendly grid" some UIs present
+    // is purely a client-side view over these signed values (html/follow.js)
+    // — FollowManager itself only ever deals in this one representation.
+    double ofsLongM = FOLLOW_OFS_LONG_M; // +ahead / -behind
+    double ofsLatM = FOLLOW_OFS_LAT_M;   // +right / -left
+    double ofsVertM = FOLLOW_OFS_VERT_M; // +above / -below
 
     // 0 = FIRST_ACTIVE, nonzero = pin to that peer id (spec §6.3).
     uint8_t targetPeer = FOLLOW_TARGET_PEER;
@@ -69,7 +53,6 @@ struct FollowRuntimeConfig {
     double minAltM = FOLLOW_MIN_ALT_M;
 
     double minCourseSpeed = FOLLOW_MIN_COURSE_SPEED;
-    FollowStationaryMode stationaryMode = FOLLOW_STATIONARY_MODE;
 
     // Commanded nose heading (spec §7.7) — sent via WP#255's p1, not a
     // second MSP message. headingDeg's meaning depends on headingMode (see
@@ -93,9 +76,8 @@ public:
     // state, locked peer id/name (if any), gate active/inactive, and the last
     // computed target (if any target has been solved this session).
     void statusJson(JsonDocument *doc);
-    // Resolved runtime config for GET /followmanager/config (Phase 3B) —
-    // reflects grid->canonical expansion regardless of offsetMode so the UI
-    // can show both views (spec §10.3).
+    // Resolved runtime config for GET /followmanager/config (Phase 3B),
+    // spec §10.3.
     void configJson(JsonDocument *doc) const;
     const FollowRuntimeConfig &getConfig() const { return config; }
     // Validates newConfig (spec §7.4 geometry rules + basic field sanity).
@@ -133,11 +115,8 @@ private:
     // the gate is inactive — loop() unconditionally forces IDLE in that
     // case regardless of what state this leaves behind.
     void forceReacquire();
-    // Expands cfg's grid (slot+gap) or returns its raw offset directly,
-    // depending on cfg.offsetMode (spec §7.3). Shared by the control loop
-    // (via resolveOffset()) and applyConfig()'s server-side §7.4 validation,
-    // so both always agree on what a given config resolves to.
-    FollowOffset offsetFromConfig(const FollowRuntimeConfig &cfg) const;
+    // Current config's canonical offset (spec §7.3), i.e. {ofsLongM,
+    // ofsLatM, ofsVertM} as a FollowOffset.
     FollowOffset resolveOffset();
     // Leader's usable track course in plain degrees, applying the
     // low-speed/stationary fallback (spec §7.5).

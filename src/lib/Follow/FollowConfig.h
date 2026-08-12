@@ -10,32 +10,9 @@
 // `float`, so no precision is thrown away converting into/out of those
 // calculations — see FollowManager.cpp for where these get combined.
 
-enum FollowLongSlot {
-    FOLLOW_LONG_AHEAD = 0,
-    FOLLOW_LONG_CENTER = 1,
-    FOLLOW_LONG_BEHIND = 2,
-};
-
-enum FollowLatSlot {
-    FOLLOW_LAT_LEFT = 0,
-    FOLLOW_LAT_CENTER = 1,
-    FOLLOW_LAT_RIGHT = 2,
-};
-
-enum FollowVertSlot {
-    FOLLOW_VERT_BELOW = 0,
-    FOLLOW_VERT_LEVEL = 1,
-    FOLLOW_VERT_ABOVE = 2,
-};
-
 enum FollowTriggerMode {
     FOLLOW_TRIGGER_GCSNAV = 0,
     FOLLOW_TRIGGER_AUX = 1,
-};
-
-enum FollowStationaryMode {
-    FOLLOW_STATIONARY_HOLD_COURSE = 0,
-    FOLLOW_STATIONARY_WORLD_FRAME = 1,
 };
 
 // Commanded nose heading, sent via WP#255's p1 field (spec §7.7) — not a
@@ -49,27 +26,20 @@ enum FollowHeadingMode {
     FOLLOW_HEADING_COURSE_RELATIVE = 4, // FOLLOW_HEADING_DEG added as an offset from course
 };
 
-// Named-preset default: chase-high (behind, centered, above). Testable with
-// the leader stationary on the ground, unlike a purely horizontal preset
-// (spec §7.3).
-#ifndef FOLLOW_SLOT_LONG
-#define FOLLOW_SLOT_LONG FOLLOW_LONG_BEHIND
+// Named-preset default: chase-high (behind, centered, above) expressed
+// directly as canonical track-relative offsets. Testable with the leader
+// stationary on the ground, unlike a purely horizontal preset (spec §7.3).
+// The AHEAD/BEHIND/LEFT/RIGHT/ABOVE/BELOW grid is a UI-only view over these
+// signed meters now (see html/follow.js) — FollowManager only ever sees the
+// canonical offset.
+#ifndef FOLLOW_OFS_LONG_M
+#define FOLLOW_OFS_LONG_M -15.0
 #endif
-#ifndef FOLLOW_SLOT_LAT
-#define FOLLOW_SLOT_LAT FOLLOW_LAT_CENTER
+#ifndef FOLLOW_OFS_LAT_M
+#define FOLLOW_OFS_LAT_M 0.0
 #endif
-#ifndef FOLLOW_SLOT_VERT
-#define FOLLOW_SLOT_VERT FOLLOW_VERT_ABOVE
-#endif
-
-#ifndef FOLLOW_GAP_LONG_M
-#define FOLLOW_GAP_LONG_M 15.0
-#endif
-#ifndef FOLLOW_GAP_LAT_M
-#define FOLLOW_GAP_LAT_M 15.0
-#endif
-#ifndef FOLLOW_GAP_VERT_M
-#define FOLLOW_GAP_VERT_M 10.0
+#ifndef FOLLOW_OFS_VERT_M
+#define FOLLOW_OFS_VERT_M 10.0
 #endif
 
 // Below this 3D slot magnitude, refuse to arm (spec §7.4).
@@ -119,10 +89,6 @@ enum FollowHeadingMode {
 // peer->gps.groundSpeed (spec §7.5, plan's unit-mismatch fix).
 #ifndef FOLLOW_MIN_COURSE_SPEED
 #define FOLLOW_MIN_COURSE_SPEED 2.0
-#endif
-
-#ifndef FOLLOW_STATIONARY_MODE
-#define FOLLOW_STATIONARY_MODE FOLLOW_STATIONARY_HOLD_COURSE
 #endif
 
 #ifndef FOLLOW_HEADING_MODE

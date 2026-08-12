@@ -153,45 +153,9 @@ void FollowManager::forceReacquire()
     lockedName[0] = '\0';
 }
 
-FollowOffset FollowManager::offsetFromConfig(const FollowRuntimeConfig &cfg) const
-{
-    if (cfg.offsetMode == FOLLOW_OFFSET_MODE_RAW)
-    {
-        return { cfg.ofsLongM, cfg.ofsLatM, cfg.ofsVertM };
-    }
-
-    FollowOffset o{};
-
-    switch (cfg.slotLong)
-    {
-        case FOLLOW_LONG_AHEAD:  o.longitudinal_m = cfg.gapLongM; break;
-        case FOLLOW_LONG_BEHIND: o.longitudinal_m = -cfg.gapLongM; break;
-        case FOLLOW_LONG_CENTER:
-        default:                 o.longitudinal_m = 0.0; break;
-    }
-
-    switch (cfg.slotLat)
-    {
-        case FOLLOW_LAT_RIGHT: o.lateral_m = cfg.gapLatM; break;
-        case FOLLOW_LAT_LEFT:  o.lateral_m = -cfg.gapLatM; break;
-        case FOLLOW_LAT_CENTER:
-        default:                o.lateral_m = 0.0; break;
-    }
-
-    switch (cfg.slotVert)
-    {
-        case FOLLOW_VERT_ABOVE: o.vertical_m = cfg.gapVertM; break;
-        case FOLLOW_VERT_BELOW: o.vertical_m = -cfg.gapVertM; break;
-        case FOLLOW_VERT_LEVEL:
-        default:                 o.vertical_m = 0.0; break;
-    }
-
-    return o;
-}
-
 FollowOffset FollowManager::resolveOffset()
 {
-    return offsetFromConfig(config);
+    return { config.ofsLongM, config.ofsLatM, config.ofsVertM };
 }
 
 double FollowManager::resolveCourseDeg(const peer_t *peer)
@@ -209,22 +173,16 @@ double FollowManager::resolveCourseDeg(const peer_t *peer)
         return lastValidCourseDeg;
     }
 
-    switch (config.stationaryMode)
+    // Leader's below-threshold — hold the last known course rather than
+    // letting the slot swing on GPS course jitter while stationary.
+    if (haveValidCourse)
     {
-        case FOLLOW_STATIONARY_HOLD_COURSE:
-            if (haveValidCourse)
-            {
-                return lastValidCourseDeg;
-            }
-            // No valid course captured yet (e.g. leader has been stationary
-            // since before acquire) — fall back to whatever's reported
-            // rather than an arbitrary 0.
-            return (double)peer->gps.groundCourse / 10.0;
-        case FOLLOW_STATIONARY_WORLD_FRAME:
-        default:
-            // Fixed world-frame axes: longitudinal = north, lateral = east.
-            return 0.0;
+        return lastValidCourseDeg;
     }
+    // No valid course captured yet (e.g. leader has been stationary since
+    // before acquire) — fall back to whatever's reported rather than an
+    // arbitrary 0.
+    return (double)peer->gps.groundCourse / 10.0;
 }
 
 int16_t FollowManager::resolveHeadingDeg(const peer_t *peer, double courseDeg) const
@@ -422,59 +380,6 @@ void FollowManager::statusJson(JsonDocument *doc)
     }
 }
 
-static const char *offsetModeName(FollowOffsetMode m)
-{
-    switch (m)
-    {
-        case FOLLOW_OFFSET_MODE_RAW: return "RAW";
-        case FOLLOW_OFFSET_MODE_GRID:
-        default:                     return "GRID";
-    }
-}
-
-static const char *slotLongName(FollowLongSlot s)
-{
-    switch (s)
-    {
-        case FOLLOW_LONG_AHEAD:  return "AHEAD";
-        case FOLLOW_LONG_BEHIND: return "BEHIND";
-        case FOLLOW_LONG_CENTER:
-        default:                 return "CENTER";
-    }
-}
-
-static const char *slotLatName(FollowLatSlot s)
-{
-    switch (s)
-    {
-        case FOLLOW_LAT_LEFT:  return "LEFT";
-        case FOLLOW_LAT_RIGHT: return "RIGHT";
-        case FOLLOW_LAT_CENTER:
-        default:                return "CENTER";
-    }
-}
-
-static const char *slotVertName(FollowVertSlot s)
-{
-    switch (s)
-    {
-        case FOLLOW_VERT_ABOVE: return "ABOVE";
-        case FOLLOW_VERT_BELOW: return "BELOW";
-        case FOLLOW_VERT_LEVEL:
-        default:                 return "LEVEL";
-    }
-}
-
-static const char *stationaryModeName(FollowStationaryMode m)
-{
-    switch (m)
-    {
-        case FOLLOW_STATIONARY_WORLD_FRAME: return "WORLD_FRAME";
-        case FOLLOW_STATIONARY_HOLD_COURSE:
-        default:                             return "HOLD_COURSE";
-    }
-}
-
 static const char *headingModeName(FollowHeadingMode m)
 {
     switch (m)
@@ -500,21 +405,9 @@ static const char *triggerModeName(FollowTriggerMode m)
 
 void FollowManager::configJson(JsonDocument *doc) const
 {
-    (*doc)["offsetMode"] = offsetModeName(config.offsetMode);
-    (*doc)["slotLong"] = slotLongName(config.slotLong);
-    (*doc)["slotLat"] = slotLatName(config.slotLat);
-    (*doc)["slotVert"] = slotVertName(config.slotVert);
-    (*doc)["gapLongM"] = config.gapLongM;
-    (*doc)["gapLatM"] = config.gapLatM;
-    (*doc)["gapVertM"] = config.gapVertM;
-
-    // Resolved canonical offsets regardless of mode, so the UI can show
-    // "what this actually resolves to right now" even while editing the
-    // grid view (spec §10.3 — "reflects grid->canonical expansion").
-    FollowOffset resolved = offsetFromConfig(config);
-    (*doc)["ofsLongM"] = resolved.longitudinal_m;
-    (*doc)["ofsLatM"] = resolved.lateral_m;
-    (*doc)["ofsVertM"] = resolved.vertical_m;
+    (*doc)["ofsLongM"] = config.ofsLongM;
+    (*doc)["ofsLatM"] = config.ofsLatM;
+    (*doc)["ofsVertM"] = config.ofsVertM;
 
     // Trigger mode is compile-time-only until Phase 2b (AUX) lands — report
     // it read-only rather than accepting it via applyConfig() (spec plan's
@@ -531,7 +424,6 @@ void FollowManager::configJson(JsonDocument *doc) const
     (*doc)["minAltM"] = config.minAltM;
 
     (*doc)["minCourseSpeed"] = config.minCourseSpeed;
-    (*doc)["stationaryMode"] = stationaryModeName(config.stationaryMode);
 
     (*doc)["headingMode"] = headingModeName(config.headingMode);
     (*doc)["headingDeg"] = config.headingDeg;
@@ -550,11 +442,6 @@ bool FollowManager::applyConfig(const FollowRuntimeConfig &newConfig, String *er
     if (newConfig.peerTimeoutMs == 0)
     {
         *errMsg = "peerTimeoutMs must be > 0";
-        return false;
-    }
-    if (newConfig.gapLongM < 0 || newConfig.gapLatM < 0 || newConfig.gapVertM < 0)
-    {
-        *errMsg = "gap values must be >= 0";
         return false;
     }
     if (newConfig.minSepM < 0 || newConfig.minVSepM < 0 || newConfig.minAltM < 0)
@@ -578,11 +465,11 @@ bool FollowManager::applyConfig(const FollowRuntimeConfig &newConfig, String *er
         return false;
     }
 
-    // Spec §7.4 geometry rules, evaluated against what this config actually
-    // resolves to (grid-expanded or raw, per offsetMode) — mirrors
-    // targetSane()'s two config-only checks so a config that's accepted
-    // here can never be rejected by targetSane() for the same reason later.
-    FollowOffset offset = offsetFromConfig(newConfig);
+    // Spec §7.4 geometry rules, evaluated against the config's canonical
+    // offset — mirrors targetSane()'s two config-only checks so a config
+    // that's accepted here can never be rejected by targetSane() for the
+    // same reason later.
+    FollowOffset offset = { newConfig.ofsLongM, newConfig.ofsLatM, newConfig.ofsVertM };
     if (!offsetGeometrySane(offset, newConfig.minSepM, newConfig.minVSepM, errMsg))
     {
         return false;

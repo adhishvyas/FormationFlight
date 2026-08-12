@@ -114,11 +114,12 @@ altitude with a `BELOW` slot (or a near-zero-relative-altitude leader on a
 is still emitted with the floored altitude and correct lat/lon.
 
 This addendum also updates Phase 3/4: `FOLLOW_MIN_ALT_M` is one more §9
-key that needs a runtime config field, EEPROM persistence, and a web UI
-control (with the same non-negative sanity validation client- and
-server-side as `FOLLOW_MIN_SEP_M`/`FOLLOW_MIN_VSEP_M` already get) — no
-new phase is needed, it just rides along with the existing Phase 3B/3C/4
-work for the rest of §9's keys. That part is still pending Phase 3/4.
+key that needs a runtime config field (Phase 3A), a web UI control with
+the same non-negative sanity validation client- and server-side as
+`FOLLOW_MIN_SEP_M`/`FOLLOW_MIN_VSEP_M` already get (Phase 3B/3C), and
+EEPROM persistence (Phase 4B) — no new phase is needed, it just rides
+along with the existing Phase 3/4 work for the rest of §9's keys. That
+part is still pending Phase 3/4.
 
 ---
 
@@ -146,34 +147,60 @@ Phase 2 (needs 1)                Phase 2b (needs 1, independent of 2)
   last target) — no config write   ships GCS-NAV trigger per chosen defaults)
        │
        ▼
-Phase 3 (needs 2; ALSO gated on a
-  team decision, see "Blocking
-  decision" below)
-  3A ConfigHandler: fix `true ||` bug (prerequisite, isolated change)
+Phase 3 (needs 2, unblocked — no EEPROM/ConfigHandler involvement)
+  3A FollowManager: in-memory runtime config struct (RAM only, seeded from
+     Phase 1's compile-time #defines at boot, lost on reboot)
        │
        ▼
-  3B FollowManager: runtime config struct + EEPROM persistence
+  3B WiFiManager: GET/POST /followmanager/config (in-memory only — no EEPROM
+     write; validates §7.4 server-side, wires FOLLOW_TARGET_PEER change →
+     forced re-acquire per §6.3)
        │
        ▼
-  3C WiFiManager: GET/POST /followmanager/config (validates §7.4 server-side,
-     wires FOLLOW_TARGET_PEER change → forced re-acquire per §6.3)
-       │
-       ▼
-Phase 4 (needs 3C; UI layout/component work can start in parallel against a
-  mocked JSON contract, but final wiring needs 3C's real endpoint)
-  4  html/main.js: new Follow config panel — friendly-grid dropdowns,
+  3C html/main.js: new Follow config panel — friendly-grid dropdowns,
      advanced raw-meters toggle, trigger-mode selector, live target-peer
-     selector (reads existing /peermanager/status), client-side §7.4 validation
+     selector (reads existing /peermanager/status), client-side §7.4
+     validation. Fires on every change (cheap — RAM only, no EEPROM wear
+     yet); UI marks edits as session-only/"not saved across reboot" since
+     there's no persistence until Phase 4.
+       │
+       ▼
+  3D (needs 3C) Nose-heading control (spec §7.7) — rides the same runtime
+     config/endpoint/panel 3A-3C already built, adds new fields to each
+     rather than new infrastructure. See "Phase 3D" section below.
+       │
+       ▼
+Phase 4 (needs 3D; ALSO gated on a team decision, see "Blocking decision"
+  below — this is where the ConfigHandler question actually matters, since
+  it's the first phase that touches EEPROM)
+  4A ConfigHandler: fix `true ||` bug (prerequisite, isolated change) —
+     moved here from the old Phase 3A; only relevant once something is
+     actually persisted/reset across reboots
+       │
+       ▼
+  4B FollowManager: EEPROM persistence for 3A's struct, via the same
+     primitives config_save()/config_init() use, own EEPROM region after
+     cfg's footprint
+       │
+       ▼
+  4C WiFiManager: POST /followmanager/commit — explicit "flush current
+     in-memory config to EEPROM" action, separate from 3B's live-edit POST;
+     rate-limited/debounced so rapid clicks don't hammer EEPROM
+       │
+       ▼
+  4D html/main.js: "Save permanently" control wired to 4C, distinct from
+     3C's live-apply controls; reflects persisted-vs-unsaved state
        │
        ▼
 Phase 5 (needs 4)
   5  Full acceptance pass: spec §12.1 bench checklist end-to-end with web UI
-     editing + reboot-persistence check, then §12.2 progressive flight test
+     editing + reboot-persistence check (via the explicit commit action),
+     then §12.2 progressive flight test
 ```
 
-### Blocking decision before Phase 3
+### Blocking decision before Phase 4
 
-Spec §13 flags that `ConfigHandler.cpp:37`'s `if (true || cfg.version != VERSION_CONFIG || forcedefault)` may be an intentional "always reset config on boot" behavior that something else currently relies on (e.g. a support workaround), not just a bug. **Confirm with the team before Phase 3A removes it** — this gates all of Phase 3/4 (persistence and the web UI), but does not block Phases 0–2, which are compile-time/read-only and ship independently of this decision.
+Spec §13 flags that `ConfigHandler.cpp:37`'s `if (true || cfg.version != VERSION_CONFIG || forcedefault)` may be an intentional "always reset config on boot" behavior that something else currently relies on (e.g. a support workaround), not just a bug. **Confirm with the team before Phase 4A removes it** — this gates all of Phase 4 (EEPROM persistence), but does not block Phases 0–3, which are compile-time, read-only, or in-memory-only and ship independently of this decision. In particular, Phase 3's web UI panel can be built and used for live/session-only tuning before this decision is resolved.
 
 ---
 
@@ -249,30 +276,71 @@ Not required for the MVP given the chosen Phase 1 default (GCS-NAV trigger), but
 
 ---
 
-## Phase 3 — Runtime config + persistence
+## Phase 3 — Runtime config (in-memory) + web UI panel [Completed]
 
-**Depends on:** Phase 2 (reuses its status endpoint pattern) **and** the blocking team decision on the `ConfigHandler` reset behavior (see above). Internally sequential (3A → 3B → 3C) since each step needs the previous to compile/function correctly.
+**Depends on:** Phase 2 (reuses its status endpoint pattern). Unblocked by the blocking team decision on the `ConfigHandler` reset behavior (see above) — nothing in this phase touches EEPROM. Internally sequential (3A → 3B → 3C) since each step needs the previous to compile/function correctly.
 
-- **3A — `src/lib/ConfigHandler.cpp`**: remove the `true ||` short-circuit at line 37, restoring the version-check/force-default logic it was presumably meant to have. Isolated, single-line-scope change; regression-test that normal (non-follow) config still initializes/persists correctly, since this affects the existing `cfg` struct too, not just the new follow config.
-- **3B — `src/lib/Follow/FollowManager.{h,cpp}`**: new config struct (all §9 keys), separate from `cfg` (don't overload the existing small/unrelated struct), persisted via the same EEPROM primitives `config_save()`/`config_init()` use, in its own EEPROM region after `cfg`'s footprint. Compile-time `#define`s from Phase 1 become the first-boot seed only.
-- **3C — `src/lib/WiFi/WiFiManager.cpp`**: `GET /followmanager/config` (resolved values, grid + canonical view) and `POST /followmanager/config` (accepts subset of §9 keys, validates including server-side §7.4 min-separation check, persists, returns resolved config). Changing `FOLLOW_TARGET_PEER` while the gate is active must force `PeerLock` back to `ACQUIRING` (§6.3's explicit escape hatch).
+- **3A — `src/lib/Follow/FollowManager.{h,cpp}`**: new runtime config struct covering all §9 keys, separate from `cfg` (don't overload the existing small/unrelated struct). RAM-only: seeded from the Phase 1 compile-time `#define`s at boot, mutated in place by 3B's endpoint, **not** written to EEPROM — a reboot always reverts to the compile-time defaults until Phase 4 lands.
+- **3B — `src/lib/WiFi/WiFiManager.cpp`**: `GET /followmanager/config` (resolved values, grid + canonical view) and `POST /followmanager/config` (accepts subset of §9 keys, validates including server-side §7.4 min-separation check, writes only to 3A's in-memory struct, returns resolved config). Changing `FOLLOW_TARGET_PEER` while the gate is active must force `PeerLock` back to `ACQUIRING` (§6.3's explicit escape hatch).
+- **3C — `html/main.js`** (or a new component file): new Follow config panel, modeled on the existing `Settings()` component's structure but wired to `/followmanager/config` and `/followmanager/status` (not the dead `/system/status` path `Settings()` currently uses).
+  - Friendly-grid dropdowns (§7.3) as the primary editing surface, "advanced" toggle for raw `FOLLOW_OFS_*_M`.
+  - Trigger-mode selector (only meaningful if Phase 2b landed; otherwise this is a read-only "GCS NAV" label).
+  - Target-peer selector populated live from the existing `/peermanager/status` endpoint (already exists — no new backend work) — this is also the §6.3 "user changes a setting" escape hatch for peer re-acquire.
+  - Client-side §7.4 minimum-separation validation that blocks Save (mirrors the server-side check in 3B — both must exist per spec, client-side isn't a substitute for server-side).
+  - No debounce needed here — the POST only touches RAM, so firing on every slider drag is cheap. (Debounce comes back in Phase 4, where it actually matters, guarding the EEPROM-write path.)
+  - UI clearly communicates that edits are live/session-only and will be lost on reboot until Phase 4's "save permanently" control exists (e.g. a persistent banner/badge, removed once Phase 4 lands).
 
-*Test:* spec §12.1 item 8 — edit a value via `POST`, reboot the follower (or bench unit), confirm the value survived (didn't revert to compile-time default); confirm changing `FOLLOW_TARGET_PEER` mid-flight-mode forces re-acquire.
+*Test:* edit each preset from the UI, confirm it takes effect (watch Phase 2's status endpoint or OSD); confirm changing `FOLLOW_TARGET_PEER` mid-flight-mode forces re-acquire; power-cycle the unit and confirm values revert to compile-time defaults (this negative-persistence case is expected/correct in Phase 3 — worth confirming explicitly before Phase 4 adds the positive case).
+
+**Implementation notes (two design points the spec left open, decided during implementation):**
+- **`POST /followmanager/config` body format:** form-encoded params (`request->getParam(name, true)`), not a JSON body. Matches every other existing POST endpoint in `WiFiManager.cpp` (`/peermanager/spoof`, `/gnssmanager/spoof`, `/radiomanager/radio_set_enabled`); the codebase has no JSON-body-parsing plumbing (`AsyncCallbackJsonWebHandler` or manual body buffering) and adding one for a single endpoint wasn't justified.
+- **Grid vs. raw-offset editing surfaces (§7.3):** `FollowRuntimeConfig` carries an explicit `offsetMode` field (`GRID` | `RAW`, `FollowManager.h`) rather than inferring the active surface from "is any raw offset nonzero" — the latter can't represent a deliberate raw `(0,0,0)` offset unambiguously. Posting any `slotLong`/`slotLat`/`slotVert`/`gapLongM`/`gapLatM`/`gapVertM` param switches the mode to `GRID`; posting any `ofsLongM`/`ofsLatM`/`ofsVertM` switches it to `RAW` (raw wins if both are posted in the same request). `GET /followmanager/config` always reports the resolved canonical `ofsLongM/LatM/VertM` regardless of mode, so the UI's advanced view can show "what this actually resolves to" even while the grid view is active.
+- `FOLLOW_TRIGGER_MODE` stays compile-time-only and is reported read-only in `configJson()` (`triggerMode` key) — not accepted by `applyConfig()` — since Phase 2b (AUX trigger) is still deferred and there's nothing for a runtime toggle to switch between yet.
+- Server-side and client-side (`html/follow.js`) validation are hand-kept-in-sync mirrors of the same §7.4 geometry rules (3D magnitude, stacked-slot vertical separation) plus basic field sanity (positive `emitHz`/`peerTimeoutMs`/`maxTargetDistM`, non-negative gaps/separations/altitude floor/course speed, in-range `targetPeer`). `FollowManager::applyConfig()` is the source of truth; the client-side copy in `follow.js`'s `validateConfig()` only blocks the Save button early and is not itself trusted.
 
 ---
 
-## Phase 4 — Web UI panel
+## Phase 3D — Nose-heading control (spec §7.7) [Completed]
 
-**Depends on:** Phase 3C for real integration. The static layout/component structure can be scaffolded earlier against a mocked JSON response matching 3C's documented contract, but wiring and final testing wait on 3C actually existing.
+**Depends on:** Phase 3C (extends the same `FollowRuntimeConfig` struct, `/followmanager/config` endpoint, and `html/follow.js` panel already built — no new infrastructure). Unblocked by the Phase 4 `ConfigHandler` decision, same reasoning as the rest of Phase 3: this never touches EEPROM.
 
-- New panel in `html/main.js` (or a new component file), modeled on the existing `Settings()` component's structure but wired to `/followmanager/config` and `/followmanager/status` (not the dead `/system/status` path `Settings()` currently uses).
-- Friendly-grid dropdowns (§7.3) as the primary editing surface, "advanced" toggle for raw `FOLLOW_OFS_*_M`.
-- Trigger-mode selector (only meaningful if Phase 2b landed; otherwise this is a read-only "GCS NAV" label).
-- Target-peer selector populated live from the existing `/peermanager/status` endpoint (already exists — no new backend work) — this is also the §6.3 "user changes a setting" escape hatch for peer re-acquire.
-- Client-side §7.4 minimum-separation validation that blocks Save (mirrors the server-side check in 3C — both must exist per spec, client-side isn't a substitute for server-side).
-- Debounce saves rather than writing on every slider drag, to avoid EEPROM wear (spec §13 open question — resolved here as "yes, debounce").
+Adds a `FOLLOW_HEADING_MODE` (default `POINT_LEADER`) + `FOLLOW_HEADING_DEG` pair of keys, live-editable via the web UI like every other §9 key, using WP#255's own `p1` field (spec §7.7) — no second MSP message, no new INAV flight mode, no craft-type branch for fixed-wing followers. Five modes: `OFF`, `COURSE`, `POINT_LEADER`, `FIXED`, and `COURSE_RELATIVE` (added after the initial §7.7 draft — offsets `FOLLOW_HEADING_DEG` from the leader's live course instead of treating it as an absolute compass heading, so a configured "look 90° right of course" angle rotates with the leader's turns; shares the same config field as `FIXED` since only one mode is active at a time).
 
-*Test:* edit each preset from the UI, confirm it takes effect (watch §2's status endpoint or OSD) and persists across reboot.
+Work items:
+- **`src/lib/Follow/FollowConfig.h`**: add the `FollowHeadingMode` enum (`OFF` / `COURSE` / `POINT_LEADER` / `FIXED` / `COURSE_RELATIVE`) and `#ifndef`-guarded `FOLLOW_HEADING_MODE` (default `FOLLOW_HEADING_POINT_LEADER`) / `FOLLOW_HEADING_DEG` (default `0.0`) defines, following the exact pattern the other `FollowConfig.h` enums/defines already use (e.g. `FollowStationaryMode`/`FOLLOW_STATIONARY_MODE`).
+- **`src/lib/Follow/FollowManager.h`**: add `headingMode`/`headingDeg` fields to `FollowRuntimeConfig`, seeded from the new compile-time defines like every other field in that struct already is. Add `int16_t resolveHeadingDeg(const peer_t *peer, double courseDeg) const` to the private interface.
+- **`src/lib/Follow/FollowManager.cpp`**:
+  - `resolveHeadingDeg()`: switches on `config.headingMode` — `COURSE` reuses the already-computed `courseDeg` (from `resolveCourseDeg()`, called once per `loop()` cycle for the position math, no duplicate work); `POINT_LEADER` calls the existing `GNSSManager::getSingleton()->courseTo(leaderLoc)` (`GNSSManager.cpp:167-171`, already used elsewhere for distance/bearing checks — no new geometry primitive) with `leaderLoc` built from `peer->gps.lat/lon` the same way `targetSane()` already builds `targetLoc`; `FIXED` returns `config.headingDeg` as-is; `COURSE_RELATIVE` returns `courseDeg + config.headingDeg` (same `courseDeg` input as `COURSE`, so it inherits the §7.5 low-speed fallback for free); `OFF` returns `0` directly (the "don't touch heading" sentinel, bypassing the wrap below). All non-`OFF` paths round to `int16_t`, wrap into `[0, 360)`, then map a result of exactly `0` to `360` (spec §7.7's `p1 > 0` gotcha) before returning.
+  - `loop()` (`FollowManager.cpp:340`): compute `headingDeg = resolveHeadingDeg(peer, courseDeg)` after `targetSane()` passes, pass it as the new fourth argument to `sendFollowWaypoint()`.
+  - `configJson()`/`applyConfig()`: add `headingMode`/`headingDeg` alongside the existing fields — no new validation rule needed beyond "is a recognized enum value" (unlike the geometry fields, there's no unsafe range for a heading in degrees, and `COURSE_RELATIVE`'s offset is a signed value with no bound either).
+- **`src/lib/MSP/MSPManager.{h,cpp}`**: extend `sendFollowWaypoint()`'s signature to `(int32_t lat_1e7, int32_t lon_1e7, int32_t alt_cm, int16_t headingDeg)`, setting `wp.p1 = headingDeg` instead of the current hardcoded `wp.p1 = 0` (spec §6.1). Update the function's doc comment to describe `p1`'s new meaning.
+- **`src/lib/WiFi/WiFiManager.cpp`**: no new endpoint — `/followmanager/config`'s existing GET/POST handlers already iterate/accept the full `FollowRuntimeConfig`; add the two new fields to the same param list.
+- **`html/follow.js`**: add a "Heading" panel (or fold into the existing "Trigger & Target" panel) with a `Setting` dropdown for `headingMode` (`OFF`/`COURSE`/`POINT_LEADER`/`FIXED`/`COURSE_RELATIVE`) and a single `Setting` number field for `headingDeg` shown whenever `headingMode` is `FIXED` **or** `COURSE_RELATIVE` — same conditional-field pattern the panel already uses for the grid-vs-advanced offset toggle (`follow.js:59,167-178`). Swap the field's label text based on which of the two modes is active (e.g. "Heading (absolute °)" vs. "Heading Offset From Course (°)") so the shared field doesn't read as the wrong frame — a UI-copy detail, not a second field. Add `headingMode`/`headingDeg` to `onsave()`'s posted body and to client-side `validateConfig()` (no numeric range needed beyond "is a number"; the 0→360 wrap is a firmware-wire-format concern the server owns, not something the client needs to replicate).
+
+*Test:* spec §12.1 item 11 — verify each mode's commanded heading against a spoofed leader at known position/course (for `COURSE_RELATIVE`, a *turning* leader, to confirm the offset tracks course rather than staying fixed to a compass bearing), the `p1==0`→`360` wrap edge case, and (if a fixed-wing bench unit is available) that the write has no effect on FW flight path. Confirm `FOLLOW_HEADING_MODE`/`FOLLOW_HEADING_DEG` are live-editable via the panel and revert to compile-time default on reboot pre-Phase-4, same as the rest of Phase 3's fields.
+
+**Implemented as designed above**, no deviations:
+- `FollowConfig.h`: `FollowHeadingMode` enum + `FOLLOW_HEADING_MODE`(default `FOLLOW_HEADING_POINT_LEADER`)/`FOLLOW_HEADING_DEG`(default `0.0`) defines.
+- `FollowManager.h`/`.cpp`: `headingMode`/`headingDeg` added to `FollowRuntimeConfig`; `resolveHeadingDeg()` implements all five modes (`POINT_LEADER` via the existing `GNSSManager::courseTo()`, no new geometry code) and owns the `[1,360]` wrap including the `0`→`360` remap; wired into `loop()` right after `targetSane()` passes; `configJson()` reports both fields.
+- `MSPManager.{h,cpp}`: `sendFollowWaypoint()` takes `headingDeg` as a fourth param and writes it to `wp.p1` (only call site is `FollowManager.cpp`, updated).
+- `WiFiManager.cpp`: `handleFollowManagerConfigPost()` parses `headingMode`/`headingDeg` the same way as every other §9 key; no new endpoint.
+- `html/follow.js`: new "Heading" panel — mode dropdown plus a single degrees field shown for `FIXED`/`COURSE_RELATIVE` with a mode-dependent label; both fields posted in `onsave()`.
+- Verified: `pio run -e diy_LoRa_Heltec_WiFi_LoRa_32_433_via_UART` builds successfully.
+
+*Test (still outstanding — bench, not yet run):* spec §12.1 item 11 in full (all five modes, the `p1==0` wrap edge case, and — if a fixed-wing bench unit is available — the no-op confirmation).
+
+---
+
+## Phase 4 — EEPROM persistence
+
+**Depends on:** Phase 3D (mutates the same in-memory struct, now including the §7.7 heading fields) **and** the blocking team decision on the `ConfigHandler` reset behavior (see above) — this is the first phase that touches EEPROM. Internally sequential (4A → 4B → 4C → 4D).
+
+- **4A — `src/lib/ConfigHandler.cpp`**: remove the `true ||` short-circuit at line 37, restoring the version-check/force-default logic it was presumably meant to have. Isolated, single-line-scope change; regression-test that normal (non-follow) config still initializes/persists correctly, since this affects the existing `cfg` struct too, not just the new follow config. (Moved here from the old Phase 3A — it only matters once something is actually persisted/reset across reboots, and Phase 3's in-memory-only config doesn't need it.)
+- **4B — `src/lib/Follow/FollowManager.{h,cpp}`**: EEPROM persistence for 3A's runtime config struct, via the same EEPROM primitives `config_save()`/`config_init()` use, in its own EEPROM region after `cfg`'s footprint.
+- **4C — `src/lib/WiFi/WiFiManager.cpp`**: `POST /followmanager/commit` — an explicit "flush the current in-memory config to EEPROM" action, distinct from 3B's live-edit `POST /followmanager/config`. Rate-limited/debounced server-side so repeated clicks (or an automated caller) don't hammer EEPROM with writes.
+- **4D — `html/main.js`**: a "Save permanently" control wired to 4C, visually distinct from 3C's live-apply controls (which only affect the in-memory struct). Reflects persisted-vs-unsaved state — e.g. disabled when the in-memory struct already matches the last-committed EEPROM values, and the "lost on reboot" banner from Phase 3 goes away once a commit succeeds.
+
+*Test:* spec §12.1 item 8 — edit a value via `POST /followmanager/config` (live, in-memory), confirm it takes effect but reverts on reboot without a commit; then call `POST /followmanager/commit`, reboot the follower (or bench unit), confirm the value survived this time (didn't revert to compile-time default). Confirm rapid repeated commits don't cause excessive EEPROM writes (the rate-limit/debounce actually engages).
 
 ---
 
@@ -280,7 +348,7 @@ Not required for the MVP given the chosen Phase 1 default (GCS-NAV trigger), but
 
 **Depends on:** Phase 4 (exercises the complete system, though most of this is re-running earlier bench/flight tests with the UI as the editing surface instead of hardcoded values/raw `POST` calls).
 
-- Full spec §12.1 bench checklist, §12.2 progressive flight checklist, §12.3 acceptance criteria — this time with all geometry presets reachable via the UI rather than reflashes, and persistence verified through the UI's own save path.
+- Full spec §12.1 bench checklist, §12.2 progressive flight checklist, §12.3 acceptance criteria — this time with all geometry presets reachable via the UI rather than reflashes, and persistence verified through the UI's explicit "Save permanently" (commit) path, not just the live-edit path.
 - Revisit spec §13's remaining open question: whether the `peer->id` reuse edge case (dropped-and-reassigned LoRa slot during `LOCKED_HOLDING`) is a real risk in practice, based on what multi-peer bench/flight testing showed in Phases 1 and 5.
 
 ---
@@ -290,16 +358,19 @@ Not required for the MVP given the chosen Phase 1 default (GCS-NAV trigger), but
 | File | Phase(s) |
 |---|---|
 | `src/lib/Peers/PeerManager.{h,cpp}` | 0A |
-| `src/lib/MSP/MSPManager.{h,cpp}` | 0B, 0C, 0D, 2b |
-| `src/lib/WiFi/WiFiManager.cpp` | 0E, 2, 3C |
-| `src/lib/Follow/FollowManager.{h,cpp}` (new) | 1, 2, 3B |
+| `src/lib/MSP/MSPManager.{h,cpp}` | 0B, 0C, 0D, 2b, 3D |
+| `src/lib/WiFi/WiFiManager.cpp` | 0E, 2, 3B, 3D, 4C |
+| `src/lib/Follow/FollowConfig.h` (new) | 1, 3D |
+| `src/lib/Follow/FollowManager.{h,cpp}` (new) | 1, 2, 3A, 3D, 4B |
 | `src/main.cpp` | 1 |
-| `src/lib/ConfigHandler.cpp` | 3A |
-| `html/main.js` | 4 |
-| `targets/*.ini` | 1 (seed `build_flags`) |
+| `src/lib/ConfigHandler.cpp` | 4A |
+| `html/main.js` | 3C, 4D |
+| `html/follow.js` (new) | 3C, 3D |
+| `targets/*.ini` | 1 (seed `build_flags`), 3D (seed §7.7 keys) |
 
 ## Open items carried from the spec (not yet resolved by this plan)
 
-- Confirm the `ConfigHandler` `true ||` reset is unintentional before Phase 3A (blocking decision, above).
+- Confirm the `ConfigHandler` `true ||` reset is unintentional before Phase 4A (blocking decision, above).
 - `peer->id` reuse edge case — deferred to real multi-peer testing in Phases 1/5, per spec §13.
 - **Altitude floor (`FOLLOW_MIN_ALT_M`, spec §7.6) is now implemented** (see "Post-Phase 1 addendum" above) — bench test item §12.1 #10 (spoofed low/descending leader) is still outstanding, and the runtime-config/web-UI half rides along with Phase 3/4.
+- **Nose-heading control (`FOLLOW_HEADING_MODE`, spec §7.7) is planned but not yet implemented** — see "Phase 3D" above. Spec §13's open question on whether `NAV_COURSE_HOLD_MODE` can coincide with `GCS NAV` follow on a fixed-wing FC (which would make the FW controller actually consume the commanded `p1` instead of ignoring it) is unverified on real hardware; worth a bench check if/when a fixed-wing follower is ever tested, though fixed-wing followers remain out of scope (§1.3) otherwise.

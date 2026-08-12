@@ -5,20 +5,25 @@ import { Icons, Setting, Button, Notification, Colored, tipColors } from './comp
 // Permit using the web ui locally for development (mirrors main.js).
 const ENDPOINT_PREFIX = window.location.host != "192.168.4.1" ? "http://192.168.4.1" : "";
 
-// Mirrors FollowManager::offsetFromConfig() / targetSane()'s stacked-slot
-// epsilon (src/lib/Follow/FollowManager.cpp) so client-side validation
-// agrees with the server-side check for the same config (spec §7.4 — both
-// must exist, client-side isn't a substitute for server-side).
+// Mirrors FollowManager::applyConfig()'s stacked-slot epsilon
+// (src/lib/Follow/FollowManager.cpp) so client-side validation agrees with
+// the server-side check for the same config (spec §7.4 — both must exist,
+// client-side isn't a substitute for server-side).
 const STACKED_HORIZONTAL_EPSILON_M = 0.5;
 
-function resolvedOffset(cfg) {
-  if (cfg.offsetMode === 'RAW') {
-    return { long: +cfg.ofsLongM, lat: +cfg.ofsLatM, vert: +cfg.ofsVertM };
-  }
-  const long = cfg.slotLong === 'AHEAD' ? +cfg.gapLongM : cfg.slotLong === 'BEHIND' ? -cfg.gapLongM : 0;
-  const lat = cfg.slotLat === 'RIGHT' ? +cfg.gapLatM : cfg.slotLat === 'LEFT' ? -cfg.gapLatM : 0;
-  const vert = cfg.slotVert === 'ABOVE' ? +cfg.gapVertM : cfg.slotVert === 'BELOW' ? -cfg.gapVertM : 0;
-  return { long, lat, vert };
+// The AHEAD/BEHIND/LEFT/RIGHT/ABOVE/BELOW "friendly grid" is purely a
+// client-side view over the canonical signed offset that's actually stored
+// (ofsLongM/ofsLatM/ofsVertM) — the server only ever sees that one
+// representation (spec §7.3).
+function slotFromOffset(v, posLabel, negLabel, zeroLabel) {
+  return v > 0 ? posLabel : v < 0 ? negLabel : zeroLabel;
+}
+
+// Recomputes a signed offset from a slot label + unsigned gap, e.g. going
+// from ('BEHIND', 15) back to -15.
+function offsetFromSlot(slot, gapM, posLabel, negLabel) {
+  const g = Math.abs(+gapM);
+  return slot === posLabel ? g : slot === negLabel ? -g : 0;
 }
 
 // Client-side mirror of FollowManager::applyConfig()'s validation
@@ -27,16 +32,15 @@ function resolvedOffset(cfg) {
 function validateConfig(cfg) {
   if (!(cfg.emitHz > 0)) return 'Emit rate must be > 0';
   if (!(cfg.peerTimeoutMs > 0)) return 'Peer timeout must be > 0';
-  if (cfg.gapLongM < 0 || cfg.gapLatM < 0 || cfg.gapVertM < 0) return 'Gap values must be >= 0';
   if (cfg.minSepM < 0 || cfg.minVSepM < 0 || cfg.minAltM < 0) return 'Min separation / vertical separation / altitude floor must be >= 0';
   if (!(cfg.maxTargetDistM > 0)) return 'Max target distance must be > 0';
   if (cfg.minCourseSpeed < 0) return 'Min course speed must be >= 0';
 
-  const o = resolvedOffset(cfg);
-  const horizontalMag = Math.sqrt(o.long * o.long + o.lat * o.lat);
-  const mag3d = Math.sqrt(horizontalMag * horizontalMag + o.vert * o.vert);
+  const long = +cfg.ofsLongM, lat = +cfg.ofsLatM, vert = +cfg.ofsVertM;
+  const horizontalMag = Math.sqrt(long * long + lat * lat);
+  const mag3d = Math.sqrt(horizontalMag * horizontalMag + vert * vert);
   if (mag3d < cfg.minSepM) return 'Slot magnitude is below Min Separation (spec §7.4)';
-  if (horizontalMag < STACKED_HORIZONTAL_EPSILON_M && Math.abs(o.vert) < cfg.minVSepM) {
+  if (horizontalMag < STACKED_HORIZONTAL_EPSILON_M && Math.abs(vert) < cfg.minVSepM) {
     return 'Stacked slot\'s vertical offset is below Min Vertical Separation (spec §7.4)';
   }
   return null;
@@ -52,7 +56,6 @@ const lockStateColors = {
 const slotLongOptions = [['AHEAD', 'Ahead'], ['CENTER', 'Center'], ['BEHIND', 'Behind']];
 const slotLatOptions = [['LEFT', 'Left'], ['CENTER', 'Center'], ['RIGHT', 'Right']];
 const slotVertOptions = [['BELOW', 'Below'], ['LEVEL', 'Level'], ['ABOVE', 'Above']];
-const stationaryModeOptions = [['HOLD_COURSE', 'Hold Last Course'], ['WORLD_FRAME', 'World Frame (N/E)']];
 const headingModeOptions = [
   ['OFF', 'Off (leave heading alone)'],
   ['COURSE', 'Direction of Travel'],
@@ -69,7 +72,10 @@ export default function FollowPanel() {
   const [saveResult, setSaveResult] = useState(null);
   const [validationError, setValidationError] = useState(null);
 
-  const applyFetchedConfig = r => { setConfig(r); setAdvanced(r.offsetMode === 'RAW'); };
+  // "advanced" is a local display preference only — both views edit the
+  // same canonical ofsLongM/ofsLatM/ofsVertM fields (spec §7.3), so there's
+  // no server-side mode to restore it from.
+  const applyFetchedConfig = r => setConfig(r);
   const refreshConfig = () => fetch(ENDPOINT_PREFIX + '/followmanager/config').then(r => r.json()).then(applyFetchedConfig);
   const refreshStatus = () => fetch(ENDPOINT_PREFIX + '/followmanager/status').then(r => r.json()).then(setStatus);
   const refreshPeers = () => fetch(ENDPOINT_PREFIX + '/peermanager/status').then(r => r.json()).then(setPeers);
@@ -86,6 +92,14 @@ export default function FollowPanel() {
   }, []);
 
   const mksetfn = k => (v => setConfig(x => Object.assign({}, x, { [k]: v })));
+  // Grid-view setters: recompute the canonical offset from a slot label or
+  // a gap magnitude, keeping whichever of the two wasn't just edited.
+  const mkslotfn = (offsetKey, posLabel, negLabel) => (slot => setConfig(x => Object.assign({}, x, {
+    [offsetKey]: offsetFromSlot(slot, Math.abs(x[offsetKey]), posLabel, negLabel),
+  })));
+  const mkgapfn = (offsetKey, posLabel, negLabel) => (gapM => setConfig(x => Object.assign({}, x, {
+    [offsetKey]: offsetFromSlot(slotFromOffset(x[offsetKey], posLabel, negLabel, posLabel), gapM, posLabel, negLabel),
+  })));
 
   const onsave = () => {
     const err = validateConfig(config);
@@ -96,18 +110,9 @@ export default function FollowPanel() {
     setValidationError(null);
 
     const body = new URLSearchParams();
-    if (advanced) {
-      body.append('ofsLongM', config.ofsLongM);
-      body.append('ofsLatM', config.ofsLatM);
-      body.append('ofsVertM', config.ofsVertM);
-    } else {
-      body.append('slotLong', config.slotLong);
-      body.append('slotLat', config.slotLat);
-      body.append('slotVert', config.slotVert);
-      body.append('gapLongM', config.gapLongM);
-      body.append('gapLatM', config.gapLatM);
-      body.append('gapVertM', config.gapVertM);
-    }
+    body.append('ofsLongM', config.ofsLongM);
+    body.append('ofsLatM', config.ofsLatM);
+    body.append('ofsVertM', config.ofsVertM);
     body.append('targetPeer', config.targetPeer);
     body.append('emitHz', config.emitHz);
     body.append('peerTimeoutMs', config.peerTimeoutMs);
@@ -116,7 +121,6 @@ export default function FollowPanel() {
     body.append('maxTargetDistM', config.maxTargetDistM);
     body.append('minAltM', config.minAltM);
     body.append('minCourseSpeed', config.minCourseSpeed);
-    body.append('stationaryMode', config.stationaryMode);
 
     body.append('headingMode', config.headingMode);
     body.append('headingDeg', config.headingDeg);
@@ -175,12 +179,12 @@ export default function FollowPanel() {
     <//>
     <div class="py-2 px-5 flex-1 flex flex-col relative">
       ${!advanced ? html`
-        <${Setting} title="Longitudinal" value=${config.slotLong} setfn=${mksetfn('slotLong')} type="select" options=${slotLongOptions} />
-        <${Setting} title="Lateral" value=${config.slotLat} setfn=${mksetfn('slotLat')} type="select" options=${slotLatOptions} />
-        <${Setting} title="Vertical" value=${config.slotVert} setfn=${mksetfn('slotVert')} type="select" options=${slotVertOptions} />
-        <${Setting} title="Longitudinal Gap" value=${config.gapLongM} setfn=${mksetfn('gapLongM')} type="number" addonRight="m" />
-        <${Setting} title="Lateral Gap" value=${config.gapLatM} setfn=${mksetfn('gapLatM')} type="number" addonRight="m" />
-        <${Setting} title="Vertical Gap" value=${config.gapVertM} setfn=${mksetfn('gapVertM')} type="number" addonRight="m" />
+        <${Setting} title="Longitudinal" value=${slotFromOffset(config.ofsLongM, 'AHEAD', 'BEHIND', 'CENTER')} setfn=${mkslotfn('ofsLongM', 'AHEAD', 'BEHIND')} type="select" options=${slotLongOptions} />
+        <${Setting} title="Lateral" value=${slotFromOffset(config.ofsLatM, 'RIGHT', 'LEFT', 'CENTER')} setfn=${mkslotfn('ofsLatM', 'RIGHT', 'LEFT')} type="select" options=${slotLatOptions} />
+        <${Setting} title="Vertical" value=${slotFromOffset(config.ofsVertM, 'ABOVE', 'BELOW', 'LEVEL')} setfn=${mkslotfn('ofsVertM', 'ABOVE', 'BELOW')} type="select" options=${slotVertOptions} />
+        <${Setting} title="Longitudinal Gap" value=${Math.abs(config.ofsLongM)} setfn=${mkgapfn('ofsLongM', 'AHEAD', 'BEHIND')} type="number" addonRight="m" />
+        <${Setting} title="Lateral Gap" value=${Math.abs(config.ofsLatM)} setfn=${mkgapfn('ofsLatM', 'RIGHT', 'LEFT')} type="number" addonRight="m" />
+        <${Setting} title="Vertical Gap" value=${Math.abs(config.ofsVertM)} setfn=${mkgapfn('ofsVertM', 'ABOVE', 'BELOW')} type="number" addonRight="m" />
       ` : html`
         <${Setting} title="Longitudinal Offset" value=${config.ofsLongM} setfn=${mksetfn('ofsLongM')} type="number" addonRight="m" addonLeft="+ahead" />
         <${Setting} title="Lateral Offset" value=${config.ofsLatM} setfn=${mksetfn('ofsLatM')} type="number" addonRight="m" addonLeft="+right" />
@@ -228,7 +232,6 @@ export default function FollowPanel() {
       <${Setting} title="Max Target Distance" value=${config.maxTargetDistM} setfn=${mksetfn('maxTargetDistM')} type="number" addonRight="m" />
       <${Setting} title="Min Altitude Floor" value=${config.minAltM} setfn=${mksetfn('minAltM')} type="number" addonRight="m" />
       <${Setting} title="Min Course Speed" value=${config.minCourseSpeed} setfn=${mksetfn('minCourseSpeed')} type="number" addonRight="m/s" />
-      <${Setting} title="Stationary Fallback" value=${config.stationaryMode} setfn=${mksetfn('stationaryMode')} type="select" options=${stationaryModeOptions} />
 
       <div class="mb-1 mt-3 flex place-content-end"><${Button} icon=${Icons.save} onclick=${onsave} title="Apply" /><//>
     <//>

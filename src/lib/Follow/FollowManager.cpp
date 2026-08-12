@@ -81,10 +81,10 @@ const peer_t *FollowManager::resolveLock()
     {
         const peer_t *candidate = nullptr;
 
-        if (FOLLOW_TARGET_PEER != 0)
+        if (config.targetPeer != 0)
         {
-            const peer_t *p = peerManager->getPeerById(FOLLOW_TARGET_PEER);
-            if (p != nullptr && !peer_is_stale(p, FOLLOW_PEER_TIMEOUT_MS))
+            const peer_t *p = peerManager->getPeerById(config.targetPeer);
+            if (p != nullptr && !peer_is_stale(p, config.peerTimeoutMs))
             {
                 candidate = p;
             }
@@ -94,7 +94,7 @@ const peer_t *FollowManager::resolveLock()
             for (uint8_t i = 0; i < NODES_MAX; i++)
             {
                 const peer_t *p = peerManager->getPeer(i);
-                if (p != nullptr && p->id > 0 && !peer_is_stale(p, FOLLOW_PEER_TIMEOUT_MS))
+                if (p != nullptr && p->id > 0 && !peer_is_stale(p, config.peerTimeoutMs))
                 {
                     candidate = p;
                     break;
@@ -117,7 +117,7 @@ const peer_t *FollowManager::resolveLock()
     if (state == FOLLOW_LOCK_LOCKED)
     {
         const peer_t *p = peerManager->getPeerById(lockedId);
-        if (p == nullptr || peer_is_stale(p, FOLLOW_PEER_TIMEOUT_MS))
+        if (p == nullptr || peer_is_stale(p, config.peerTimeoutMs))
         {
             state = FOLLOW_LOCK_LOCKED_HOLDING;
             return nullptr;
@@ -129,7 +129,7 @@ const peer_t *FollowManager::resolveLock()
     // freshness every cycle, but never scan for or switch to another peer
     // (spec §6.3 — no automatic failover).
     const peer_t *p = peerManager->getPeerById(lockedId);
-    if (p != nullptr && !peer_is_stale(p, FOLLOW_PEER_TIMEOUT_MS))
+    if (p != nullptr && !peer_is_stale(p, config.peerTimeoutMs))
     {
         if (strncmp(p->name, lockedName, sizeof(lockedName)) == 0)
         {
@@ -146,30 +146,42 @@ const peer_t *FollowManager::resolveLock()
     return nullptr;
 }
 
-FollowOffset FollowManager::resolveOffset()
+void FollowManager::forceReacquire()
 {
+    state = FOLLOW_LOCK_ACQUIRING;
+    lockedId = 0;
+    lockedName[0] = '\0';
+}
+
+FollowOffset FollowManager::offsetFromConfig(const FollowRuntimeConfig &cfg) const
+{
+    if (cfg.offsetMode == FOLLOW_OFFSET_MODE_RAW)
+    {
+        return { cfg.ofsLongM, cfg.ofsLatM, cfg.ofsVertM };
+    }
+
     FollowOffset o{};
 
-    switch (FOLLOW_SLOT_LONG)
+    switch (cfg.slotLong)
     {
-        case FOLLOW_LONG_AHEAD:  o.longitudinal_m = FOLLOW_GAP_LONG_M; break;
-        case FOLLOW_LONG_BEHIND: o.longitudinal_m = -FOLLOW_GAP_LONG_M; break;
+        case FOLLOW_LONG_AHEAD:  o.longitudinal_m = cfg.gapLongM; break;
+        case FOLLOW_LONG_BEHIND: o.longitudinal_m = -cfg.gapLongM; break;
         case FOLLOW_LONG_CENTER:
         default:                 o.longitudinal_m = 0.0; break;
     }
 
-    switch (FOLLOW_SLOT_LAT)
+    switch (cfg.slotLat)
     {
-        case FOLLOW_LAT_RIGHT: o.lateral_m = FOLLOW_GAP_LAT_M; break;
-        case FOLLOW_LAT_LEFT:  o.lateral_m = -FOLLOW_GAP_LAT_M; break;
+        case FOLLOW_LAT_RIGHT: o.lateral_m = cfg.gapLatM; break;
+        case FOLLOW_LAT_LEFT:  o.lateral_m = -cfg.gapLatM; break;
         case FOLLOW_LAT_CENTER:
         default:                o.lateral_m = 0.0; break;
     }
 
-    switch (FOLLOW_SLOT_VERT)
+    switch (cfg.slotVert)
     {
-        case FOLLOW_VERT_ABOVE: o.vertical_m = FOLLOW_GAP_VERT_M; break;
-        case FOLLOW_VERT_BELOW: o.vertical_m = -FOLLOW_GAP_VERT_M; break;
+        case FOLLOW_VERT_ABOVE: o.vertical_m = cfg.gapVertM; break;
+        case FOLLOW_VERT_BELOW: o.vertical_m = -cfg.gapVertM; break;
         case FOLLOW_VERT_LEVEL:
         default:                 o.vertical_m = 0.0; break;
     }
@@ -177,13 +189,18 @@ FollowOffset FollowManager::resolveOffset()
     return o;
 }
 
+FollowOffset FollowManager::resolveOffset()
+{
+    return offsetFromConfig(config);
+}
+
 double FollowManager::resolveCourseDeg(const peer_t *peer)
 {
-    // peer->gps.groundSpeed is int16 cm/s; FOLLOW_MIN_COURSE_SPEED is
-    // human-facing m/s. Convert at the comparison site — comparing the raw
-    // values directly (e.g. "200 < 2") would almost never trip and would
-    // silently defeat this fallback (spec §7.5).
-    int16_t minSpeedCmS = (int16_t)lround(FOLLOW_MIN_COURSE_SPEED * 100.0);
+    // peer->gps.groundSpeed is int16 cm/s; minCourseSpeed is human-facing
+    // m/s. Convert at the comparison site — comparing the raw values
+    // directly (e.g. "200 < 2") would almost never trip and would silently
+    // defeat this fallback (spec §7.5).
+    int16_t minSpeedCmS = (int16_t)lround(config.minCourseSpeed * 100.0);
 
     if (peer->gps.groundSpeed >= minSpeedCmS)
     {
@@ -192,7 +209,7 @@ double FollowManager::resolveCourseDeg(const peer_t *peer)
         return lastValidCourseDeg;
     }
 
-    switch (FOLLOW_STATIONARY_MODE)
+    switch (config.stationaryMode)
     {
         case FOLLOW_STATIONARY_HOLD_COURSE:
             if (haveValidCourse)
@@ -210,21 +227,37 @@ double FollowManager::resolveCourseDeg(const peer_t *peer)
     }
 }
 
-bool FollowManager::targetSane(const FollowOffset &offset, const FollowTarget &target)
+// Shared by targetSane() (runtime, has a live peer) and applyConfig()
+// (server-side §7.4 validation of a candidate config with no peer in
+// scope yet) so both always agree on the same two geometry rules. Only the
+// two checks that depend purely on the configured offset — not on a live
+// peer/target — live here; targetSane()'s max-distance-from-self check has
+// no equivalent at config-validation time and stays in targetSane() below.
+static bool offsetGeometrySane(const FollowOffset &offset, double minSepM, double minVSepM, String *errMsg)
 {
     double horizontalMag = sqrt(offset.longitudinal_m * offset.longitudinal_m +
                                  offset.lateral_m * offset.lateral_m);
     double mag3d = sqrt(horizontalMag * horizontalMag + offset.vertical_m * offset.vertical_m);
 
     // Minimum 3D separation — forbids the degenerate collision slot (spec §7.4).
-    if (mag3d < FOLLOW_MIN_SEP_M)
+    if (mag3d < minSepM)
     {
+        if (errMsg) *errMsg = "slot magnitude is below minSepM (spec §7.4 minimum 3D separation)";
         return false;
     }
-
     // Minimum vertical gap for stacked (overhead/underneath) slots — absorbs
     // GPS vertical error, not just physical clearance (spec §7.4).
-    if (horizontalMag < FOLLOW_STACKED_HORIZONTAL_EPSILON_M && fabs(offset.vertical_m) < FOLLOW_MIN_VSEP_M)
+    if (horizontalMag < FOLLOW_STACKED_HORIZONTAL_EPSILON_M && fabs(offset.vertical_m) < minVSepM)
+    {
+        if (errMsg) *errMsg = "stacked slot's vertical offset is below minVSepM (spec §7.4)";
+        return false;
+    }
+    return true;
+}
+
+bool FollowManager::targetSane(const FollowOffset &offset, const FollowTarget &target)
+{
+    if (!offsetGeometrySane(offset, config.minSepM, config.minVSepM, nullptr))
     {
         return false;
     }
@@ -235,7 +268,7 @@ bool FollowManager::targetSane(const FollowOffset &offset, const FollowTarget &t
     targetLoc.lat = (double)target.lat_1e7 / 1e7;
     targetLoc.lon = (double)target.lon_1e7 / 1e7;
     double distFromSelf = GNSSManager::getSingleton()->horizontalDistanceTo(targetLoc);
-    if (distFromSelf > FOLLOW_MAX_TARGET_DIST_M)
+    if (distFromSelf > config.maxTargetDistM)
     {
         return false;
     }
@@ -253,7 +286,7 @@ void FollowManager::loop()
     {
         return;
     }
-    nextRunTime = millis() + (1000 / FOLLOW_EMIT_HZ);
+    nextRunTime = millis() + (1000 / config.emitHz);
 
     if (!followSwitchActive())
     {
@@ -293,7 +326,7 @@ void FollowManager::loop()
     // slot dragging the follower toward the ground. Clamp, don't reject:
     // unlike targetSane() below, this must not suppress the waypoint —
     // the follower should keep tracking laterally and hold at the floor.
-    int32_t floorCm = (int32_t)lround(FOLLOW_MIN_ALT_M * 100.0);
+    int32_t floorCm = (int32_t)lround(config.minAltM * 100.0);
     if (altCm < floorCm)
     {
         altCm = floorCm;
@@ -338,4 +371,163 @@ void FollowManager::statusJson(JsonDocument *doc)
         target["altCm"] = lastTargetAltCm;
         target["ageMs"] = millis() - lastTargetTime;
     }
+}
+
+static const char *offsetModeName(FollowOffsetMode m)
+{
+    switch (m)
+    {
+        case FOLLOW_OFFSET_MODE_RAW: return "RAW";
+        case FOLLOW_OFFSET_MODE_GRID:
+        default:                     return "GRID";
+    }
+}
+
+static const char *slotLongName(FollowLongSlot s)
+{
+    switch (s)
+    {
+        case FOLLOW_LONG_AHEAD:  return "AHEAD";
+        case FOLLOW_LONG_BEHIND: return "BEHIND";
+        case FOLLOW_LONG_CENTER:
+        default:                 return "CENTER";
+    }
+}
+
+static const char *slotLatName(FollowLatSlot s)
+{
+    switch (s)
+    {
+        case FOLLOW_LAT_LEFT:  return "LEFT";
+        case FOLLOW_LAT_RIGHT: return "RIGHT";
+        case FOLLOW_LAT_CENTER:
+        default:                return "CENTER";
+    }
+}
+
+static const char *slotVertName(FollowVertSlot s)
+{
+    switch (s)
+    {
+        case FOLLOW_VERT_ABOVE: return "ABOVE";
+        case FOLLOW_VERT_BELOW: return "BELOW";
+        case FOLLOW_VERT_LEVEL:
+        default:                 return "LEVEL";
+    }
+}
+
+static const char *stationaryModeName(FollowStationaryMode m)
+{
+    switch (m)
+    {
+        case FOLLOW_STATIONARY_WORLD_FRAME: return "WORLD_FRAME";
+        case FOLLOW_STATIONARY_HOLD_COURSE:
+        default:                             return "HOLD_COURSE";
+    }
+}
+
+static const char *triggerModeName(FollowTriggerMode m)
+{
+    switch (m)
+    {
+        case FOLLOW_TRIGGER_AUX: return "AUX";
+        case FOLLOW_TRIGGER_GCSNAV:
+        default:                  return "GCSNAV";
+    }
+}
+
+void FollowManager::configJson(JsonDocument *doc) const
+{
+    (*doc)["offsetMode"] = offsetModeName(config.offsetMode);
+    (*doc)["slotLong"] = slotLongName(config.slotLong);
+    (*doc)["slotLat"] = slotLatName(config.slotLat);
+    (*doc)["slotVert"] = slotVertName(config.slotVert);
+    (*doc)["gapLongM"] = config.gapLongM;
+    (*doc)["gapLatM"] = config.gapLatM;
+    (*doc)["gapVertM"] = config.gapVertM;
+
+    // Resolved canonical offsets regardless of mode, so the UI can show
+    // "what this actually resolves to right now" even while editing the
+    // grid view (spec §10.3 — "reflects grid->canonical expansion").
+    FollowOffset resolved = offsetFromConfig(config);
+    (*doc)["ofsLongM"] = resolved.longitudinal_m;
+    (*doc)["ofsLatM"] = resolved.lateral_m;
+    (*doc)["ofsVertM"] = resolved.vertical_m;
+
+    // Trigger mode is compile-time-only until Phase 2b (AUX) lands — report
+    // it read-only rather than accepting it via applyConfig() (spec plan's
+    // Phase 3 notes).
+    (*doc)["triggerMode"] = triggerModeName((FollowTriggerMode)FOLLOW_TRIGGER_MODE);
+
+    (*doc)["targetPeer"] = config.targetPeer;
+    (*doc)["emitHz"] = config.emitHz;
+    (*doc)["peerTimeoutMs"] = config.peerTimeoutMs;
+
+    (*doc)["minSepM"] = config.minSepM;
+    (*doc)["minVSepM"] = config.minVSepM;
+    (*doc)["maxTargetDistM"] = config.maxTargetDistM;
+    (*doc)["minAltM"] = config.minAltM;
+
+    (*doc)["minCourseSpeed"] = config.minCourseSpeed;
+    (*doc)["stationaryMode"] = stationaryModeName(config.stationaryMode);
+}
+
+bool FollowManager::applyConfig(const FollowRuntimeConfig &newConfig, String *errMsg)
+{
+    String localErr;
+    if (!errMsg) errMsg = &localErr;
+
+    if (newConfig.emitHz == 0)
+    {
+        *errMsg = "emitHz must be > 0";
+        return false;
+    }
+    if (newConfig.peerTimeoutMs == 0)
+    {
+        *errMsg = "peerTimeoutMs must be > 0";
+        return false;
+    }
+    if (newConfig.gapLongM < 0 || newConfig.gapLatM < 0 || newConfig.gapVertM < 0)
+    {
+        *errMsg = "gap values must be >= 0";
+        return false;
+    }
+    if (newConfig.minSepM < 0 || newConfig.minVSepM < 0 || newConfig.minAltM < 0)
+    {
+        *errMsg = "minSepM/minVSepM/minAltM must be >= 0";
+        return false;
+    }
+    if (newConfig.maxTargetDistM <= 0)
+    {
+        *errMsg = "maxTargetDistM must be > 0";
+        return false;
+    }
+    if (newConfig.minCourseSpeed < 0)
+    {
+        *errMsg = "minCourseSpeed must be >= 0";
+        return false;
+    }
+    if (newConfig.targetPeer > NODES_MAX)
+    {
+        *errMsg = "targetPeer out of range";
+        return false;
+    }
+
+    // Spec §7.4 geometry rules, evaluated against what this config actually
+    // resolves to (grid-expanded or raw, per offsetMode) — mirrors
+    // targetSane()'s two config-only checks so a config that's accepted
+    // here can never be rejected by targetSane() for the same reason later.
+    FollowOffset offset = offsetFromConfig(newConfig);
+    if (!offsetGeometrySane(offset, newConfig.minSepM, newConfig.minVSepM, errMsg))
+    {
+        return false;
+    }
+
+    bool targetPeerChanged = (newConfig.targetPeer != config.targetPeer);
+    config = newConfig;
+    if (targetPeerChanged)
+    {
+        forceReacquire();
+    }
+    return true;
 }

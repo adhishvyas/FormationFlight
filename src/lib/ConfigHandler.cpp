@@ -34,7 +34,7 @@ void config_init(bool forcedefault)
         ((char *)&cfg)[i] = data;
     }
 
-    if (true || cfg.version != VERSION_CONFIG || forcedefault)
+    if (cfg.version != VERSION_CONFIG || forcedefault)
     {
         cfg.version = VERSION_CONFIG;
         cfg.force_gs = false;

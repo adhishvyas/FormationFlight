@@ -34,7 +34,11 @@ public:
     void sendRadar(const peer_t *peer);
     // Sends the INAV follow-me special waypoint #255 via MSP_SET_WP.
     // Requires NAV POSHOLD + GCS NAV active on the follower FC.
-    void sendFollowWaypoint(int32_t lat_1e7, int32_t lon_1e7, int32_t alt_cm);
+    // headingDeg: commanded nose heading in degrees, 1-360 (spec §7.7), or 0
+    // to leave heading untouched this cycle — INAV's WP#255 handler treats
+    // p1 == 0 as "no heading update," not due north, so callers must map a
+    // computed heading of exactly 0 to 360 themselves (FollowManager does).
+    void sendFollowWaypoint(int32_t lat_1e7, int32_t lon_1e7, int32_t alt_cm, int16_t headingDeg);
     void sendLocation(GNSSLocation location);
     void begin(Stream &stream);
     void statusJson(JsonDocument *doc);

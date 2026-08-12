@@ -53,6 +53,13 @@ const slotLongOptions = [['AHEAD', 'Ahead'], ['CENTER', 'Center'], ['BEHIND', 'B
 const slotLatOptions = [['LEFT', 'Left'], ['CENTER', 'Center'], ['RIGHT', 'Right']];
 const slotVertOptions = [['BELOW', 'Below'], ['LEVEL', 'Level'], ['ABOVE', 'Above']];
 const stationaryModeOptions = [['HOLD_COURSE', 'Hold Last Course'], ['WORLD_FRAME', 'World Frame (N/E)']];
+const headingModeOptions = [
+  ['OFF', 'Off (leave heading alone)'],
+  ['COURSE', 'Direction of Travel'],
+  ['POINT_LEADER', 'Point at Leader'],
+  ['FIXED', 'Fixed Compass Heading'],
+  ['COURSE_RELATIVE', 'Offset From Course'],
+];
 
 export default function FollowPanel() {
   const [config, setConfig] = useState(null);
@@ -110,6 +117,9 @@ export default function FollowPanel() {
     body.append('minAltM', config.minAltM);
     body.append('minCourseSpeed', config.minCourseSpeed);
     body.append('stationaryMode', config.stationaryMode);
+
+    body.append('headingMode', config.headingMode);
+    body.append('headingDeg', config.headingDeg);
 
     return fetch(ENDPOINT_PREFIX + '/followmanager/config', { method: 'POST', body })
       .then(r => r.ok
@@ -188,6 +198,20 @@ export default function FollowPanel() {
       <${Setting} title="Target Peer" value=${config.targetPeer} setfn=${mksetfn('targetPeer')} type="select" options=${targetPeerOptions} />
       <${Setting} title="Emit Rate" value=${config.emitHz} setfn=${mksetfn('emitHz')} type="number" addonRight="Hz" />
       <${Setting} title="Peer Timeout" value=${config.peerTimeoutMs} setfn=${mksetfn('peerTimeoutMs')} type="number" addonRight="ms" />
+    <//>
+  <//>
+
+  <div class="py-1 divide-y border rounded bg-white flex flex-col">
+    <div class="font-light uppercase flex items-center text-gray-600 px-4 py-2">
+      Heading
+    <//>
+    <div class="py-2 px-5 flex-1 flex flex-col relative">
+      <${Setting} title="Mode" value=${config.headingMode} setfn=${mksetfn('headingMode')} type="select" options=${headingModeOptions} />
+      ${(config.headingMode === 'FIXED' || config.headingMode === 'COURSE_RELATIVE') && html`
+        <${Setting}
+          title=${config.headingMode === 'FIXED' ? 'Heading (absolute)' : 'Heading Offset From Course'}
+          value=${config.headingDeg} setfn=${mksetfn('headingDeg')} type="number" addonRight="°" />
+      `}
     <//>
   <//>
 

@@ -70,6 +70,12 @@ struct FollowRuntimeConfig {
 
     double minCourseSpeed = FOLLOW_MIN_COURSE_SPEED;
     FollowStationaryMode stationaryMode = FOLLOW_STATIONARY_MODE;
+
+    // Commanded nose heading (spec §7.7) — sent via WP#255's p1, not a
+    // second MSP message. headingDeg's meaning depends on headingMode (see
+    // FollowConfig.h's FollowHeadingMode).
+    FollowHeadingMode headingMode = FOLLOW_HEADING_MODE;
+    double headingDeg = FOLLOW_HEADING_DEG;
 };
 
 // Projects a leader position + track-relative offset to an absolute lat/lon
@@ -137,4 +143,12 @@ private:
     // low-speed/stationary fallback (spec §7.5).
     double resolveCourseDeg(const peer_t *peer);
     bool targetSane(const FollowOffset &offset, const FollowTarget &target);
+    // Commanded nose heading for this cycle, resolved per config.headingMode
+    // (spec §7.7). courseDeg is the already-computed resolveCourseDeg()
+    // result, reused here instead of recomputed. Returns 0 for
+    // FOLLOW_HEADING_OFF (the "don't touch heading" wire sentinel);
+    // otherwise wraps into [1, 360] — a computed value of exactly 0 is
+    // remapped to 360, since INAV's WP#255 handler treats p1 == 0 as "no
+    // heading update," not due north.
+    int16_t resolveHeadingDeg(const peer_t *peer, double courseDeg) const;
 };

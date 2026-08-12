@@ -227,6 +227,50 @@ double FollowManager::resolveCourseDeg(const peer_t *peer)
     }
 }
 
+int16_t FollowManager::resolveHeadingDeg(const peer_t *peer, double courseDeg) const
+{
+    double raw;
+    switch (config.headingMode)
+    {
+        case FOLLOW_HEADING_COURSE:
+            raw = courseDeg;
+            break;
+        case FOLLOW_HEADING_POINT_LEADER:
+        {
+            // peer->gps.lat/lon are int32 x1e6 (spec §5[A] scaling note) —
+            // same conversion slotToLatLon() uses for the leader's own
+            // origin point.
+            GNSSLocation leaderLoc{};
+            leaderLoc.lat = (double)peer->gps.lat / 1e6;
+            leaderLoc.lon = (double)peer->gps.lon / 1e6;
+            raw = (double)GNSSManager::getSingleton()->courseTo(leaderLoc);
+            break;
+        }
+        case FOLLOW_HEADING_FIXED:
+            raw = config.headingDeg;
+            break;
+        case FOLLOW_HEADING_COURSE_RELATIVE:
+            raw = courseDeg + config.headingDeg;
+            break;
+        case FOLLOW_HEADING_OFF:
+        default:
+            return 0; // wire sentinel: don't update heading this cycle
+    }
+
+    int32_t deg = (int32_t)lround(raw) % 360;
+    if (deg < 0)
+    {
+        deg += 360;
+    }
+    if (deg == 0)
+    {
+        // INAV's WP#255 handler requires p1 > 0 to apply a heading update —
+        // p1 == 0 means "leave heading alone," not "due north" (spec §7.7).
+        deg = 360;
+    }
+    return (int16_t)deg;
+}
+
 // Shared by targetSane() (runtime, has a live peer) and applyConfig()
 // (server-side §7.4 validation of a candidate config with no peer in
 // scope yet) so both always agree on the same two geometry rules. Only the
@@ -337,7 +381,12 @@ void FollowManager::loop()
         return;
     }
 
-    MSPManager::getSingleton()->sendFollowWaypoint(target.lat_1e7, target.lon_1e7, altCm);
+    // Nose heading (spec §7.7) — independent of the position target above.
+    // Computed the same way regardless of follower airframe; no craft-type
+    // branch (spec §7.7 explains why that's safe for fixed-wing too).
+    int16_t headingDeg = resolveHeadingDeg(peer, courseDeg);
+
+    MSPManager::getSingleton()->sendFollowWaypoint(target.lat_1e7, target.lon_1e7, altCm, headingDeg);
 
     haveLastTarget = true;
     lastTarget = target;
@@ -426,6 +475,19 @@ static const char *stationaryModeName(FollowStationaryMode m)
     }
 }
 
+static const char *headingModeName(FollowHeadingMode m)
+{
+    switch (m)
+    {
+        case FOLLOW_HEADING_COURSE:          return "COURSE";
+        case FOLLOW_HEADING_POINT_LEADER:    return "POINT_LEADER";
+        case FOLLOW_HEADING_FIXED:           return "FIXED";
+        case FOLLOW_HEADING_COURSE_RELATIVE: return "COURSE_RELATIVE";
+        case FOLLOW_HEADING_OFF:
+        default:                              return "OFF";
+    }
+}
+
 static const char *triggerModeName(FollowTriggerMode m)
 {
     switch (m)
@@ -470,6 +532,9 @@ void FollowManager::configJson(JsonDocument *doc) const
 
     (*doc)["minCourseSpeed"] = config.minCourseSpeed;
     (*doc)["stationaryMode"] = stationaryModeName(config.stationaryMode);
+
+    (*doc)["headingMode"] = headingModeName(config.headingMode);
+    (*doc)["headingDeg"] = config.headingDeg;
 }
 
 bool FollowManager::applyConfig(const FollowRuntimeConfig &newConfig, String *errMsg)

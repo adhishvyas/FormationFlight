@@ -38,6 +38,17 @@ enum FollowStationaryMode {
     FOLLOW_STATIONARY_WORLD_FRAME = 1,
 };
 
+// Commanded nose heading, sent via WP#255's p1 field (spec §7.7) — not a
+// second MSP message. Applies uniformly to rotorcraft and fixed-wing
+// followers; no craft-type branch (see spec §7.7 for why that's safe).
+enum FollowHeadingMode {
+    FOLLOW_HEADING_OFF = 0,             // don't touch heading (p1 = 0, pre-§7.7 behavior)
+    FOLLOW_HEADING_COURSE = 1,          // direction of travel (leader's course)
+    FOLLOW_HEADING_POINT_LEADER = 2,    // bearing toward the leader's live position
+    FOLLOW_HEADING_FIXED = 3,           // FOLLOW_HEADING_DEG as an absolute compass heading
+    FOLLOW_HEADING_COURSE_RELATIVE = 4, // FOLLOW_HEADING_DEG added as an offset from course
+};
+
 // Named-preset default: chase-high (behind, centered, above). Testable with
 // the leader stationary on the ground, unlike a purely horizontal preset
 // (spec §7.3).
@@ -112,4 +123,15 @@ enum FollowStationaryMode {
 
 #ifndef FOLLOW_STATIONARY_MODE
 #define FOLLOW_STATIONARY_MODE FOLLOW_STATIONARY_HOLD_COURSE
+#endif
+
+#ifndef FOLLOW_HEADING_MODE
+#define FOLLOW_HEADING_MODE FOLLOW_HEADING_POINT_LEADER
+#endif
+
+// Degrees. Meaning depends on FOLLOW_HEADING_MODE: absolute compass heading
+// for FIXED, offset added to the leader's live course for COURSE_RELATIVE
+// (spec §7.7) — unused by the other modes.
+#ifndef FOLLOW_HEADING_DEG
+#define FOLLOW_HEADING_DEG 0.0
 #endif

@@ -267,7 +267,10 @@ void MSPManager::sendRadar(const peer_t *peer)
 
 // MSP_SET_WP (#209) - INAV follow-me special waypoint #255.
 // Requires NAV POSHOLD + GCS NAV active on the follower FC.
-void MSPManager::sendFollowWaypoint(int32_t lat_1e7, int32_t lon_1e7, int32_t alt_cm)
+// p1 doubles as heading for this special waypoint only (spec §7.7) - for
+// ordinary mission waypoints (1-60) it means cruise speed instead; the two
+// are not the same field just because they share a byte offset.
+void MSPManager::sendFollowWaypoint(int32_t lat_1e7, int32_t lon_1e7, int32_t alt_cm, int16_t headingDeg)
 {
     msp_set_wp_t wp{};
     wp.waypointNumber = 255;
@@ -275,7 +278,7 @@ void MSPManager::sendFollowWaypoint(int32_t lat_1e7, int32_t lon_1e7, int32_t al
     wp.lat = lat_1e7;
     wp.lon = lon_1e7;
     wp.alt = alt_cm;         // home-relative, p3 bit0 = 0 below
-    wp.p1 = 0; wp.p2 = 0; wp.p3 = 0;
+    wp.p1 = headingDeg; wp.p2 = 0; wp.p3 = 0;
     wp.flag = 0;
     msp->command(MSP_SET_WP, &wp, sizeof(wp));
 }

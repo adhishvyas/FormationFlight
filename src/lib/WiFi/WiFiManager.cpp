@@ -351,6 +351,20 @@ void handleFollowManagerConfigPost(AsyncWebServerRequest *request)
         else { request->send(400, "text/plain", "invalid stationaryMode (want HOLD_COURSE/WORLD_FRAME)"); return; }
     }
 
+    // Nose heading (spec §7.7) — headingDeg is shared between FIXED
+    // (absolute) and COURSE_RELATIVE (offset from course); which
+    // interpretation applies depends solely on headingMode.
+    if (request->hasParam("headingMode", true)) {
+        String v = strParam("headingMode");
+        if (v == "OFF") cfg.headingMode = FOLLOW_HEADING_OFF;
+        else if (v == "COURSE") cfg.headingMode = FOLLOW_HEADING_COURSE;
+        else if (v == "POINT_LEADER") cfg.headingMode = FOLLOW_HEADING_POINT_LEADER;
+        else if (v == "FIXED") cfg.headingMode = FOLLOW_HEADING_FIXED;
+        else if (v == "COURSE_RELATIVE") cfg.headingMode = FOLLOW_HEADING_COURSE_RELATIVE;
+        else { request->send(400, "text/plain", "invalid headingMode (want OFF/COURSE/POINT_LEADER/FIXED/COURSE_RELATIVE)"); return; }
+    }
+    if (request->hasParam("headingDeg", true)) cfg.headingDeg = strParam("headingDeg").toDouble();
+
     String errMsg;
     if (!FollowManager::getSingleton()->applyConfig(cfg, &errMsg)) {
         request->send(400, "text/plain", errMsg);

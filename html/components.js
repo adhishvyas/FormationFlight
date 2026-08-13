@@ -178,10 +178,19 @@ export function FileValue({ onchange }) {
   `;
 }
 
+export function Tooltip({ text }) {
+  if (!text) return '';
+  return html`
+<span class="tooltip-wrap" tabindex="0">
+  <${Icons.info} class="w-4 h-4 tooltip-icon" />
+  <span class="tooltip-bubble" role="tooltip">${text}<//>
+<//>`;
+}
+
 export function Setting(props) {
   return html`
 <div class=${props.cls || 'grid grid-cols-2 gap-2 my-1'}>
-  <label class="flex items-center text-sm text-gray-700 mr-2 font-medium">${props.title}<//>
+  <label class="flex items-center text-sm text-gray-700 mr-2 font-medium">${props.title}<${Tooltip} text=${props.tip} /><//>
   <div class="flex items-center">
     ${props.type == 'switch' ? h(SwitchValue, props) :
       props.type == 'select' ? h(SelectValue, props) :

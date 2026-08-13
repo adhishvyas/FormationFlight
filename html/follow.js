@@ -179,16 +179,22 @@ export default function FollowPanel() {
     <//>
     <div class="py-2 px-5 flex-1 flex flex-col relative">
       ${!advanced ? html`
-        <${Setting} title="Longitudinal" value=${slotFromOffset(config.ofsLongM, 'AHEAD', 'BEHIND', 'CENTER')} setfn=${mkslotfn('ofsLongM', 'AHEAD', 'BEHIND')} type="select" options=${slotLongOptions} />
-        <${Setting} title="Lateral" value=${slotFromOffset(config.ofsLatM, 'RIGHT', 'LEFT', 'CENTER')} setfn=${mkslotfn('ofsLatM', 'RIGHT', 'LEFT')} type="select" options=${slotLatOptions} />
-        <${Setting} title="Vertical" value=${slotFromOffset(config.ofsVertM, 'ABOVE', 'BELOW', 'LEVEL')} setfn=${mkslotfn('ofsVertM', 'ABOVE', 'BELOW')} type="select" options=${slotVertOptions} />
-        <${Setting} title="Longitudinal Gap" value=${Math.abs(config.ofsLongM)} setfn=${mkgapfn('ofsLongM', 'AHEAD', 'BEHIND')} type="number" addonRight="m" />
-        <${Setting} title="Lateral Gap" value=${Math.abs(config.ofsLatM)} setfn=${mkgapfn('ofsLatM', 'RIGHT', 'LEFT')} type="number" addonRight="m" />
-        <${Setting} title="Vertical Gap" value=${Math.abs(config.ofsVertM)} setfn=${mkgapfn('ofsVertM', 'ABOVE', 'BELOW')} type="number" addonRight="m" />
+        <div class="flex gap-4">
+          <div class="flex-1"><${Setting} title="Longitudinal" tip="Whether your craft flies ahead of, behind, or level with the leader, measured along the leader's direction of travel." value=${slotFromOffset(config.ofsLongM, 'AHEAD', 'BEHIND', 'CENTER')} setfn=${mkslotfn('ofsLongM', 'AHEAD', 'BEHIND')} type="select" options=${slotLongOptions} /><//>
+          <div class="flex-1"><${Setting} title="Longitudinal Gap" tip="Distance to keep ahead of or behind the leader, in meters." value=${Math.abs(config.ofsLongM)} setfn=${mkgapfn('ofsLongM', 'AHEAD', 'BEHIND')} type="number" addonRight="m" /><//>
+        <//>
+        <div class="flex gap-4">
+          <div class="flex-1"><${Setting} title="Lateral" tip="Whether your craft flies to the left, right, or directly in line with the leader, viewed from behind the leader looking forward." value=${slotFromOffset(config.ofsLatM, 'RIGHT', 'LEFT', 'CENTER')} setfn=${mkslotfn('ofsLatM', 'RIGHT', 'LEFT')} type="select" options=${slotLatOptions} /><//>
+          <div class="flex-1"><${Setting} title="Lateral Gap" tip="Sideways distance to keep from the leader's flight path, in meters." value=${Math.abs(config.ofsLatM)} setfn=${mkgapfn('ofsLatM', 'RIGHT', 'LEFT')} type="number" addonRight="m" /><//>
+        <//>
+        <div class="flex gap-4">
+          <div class="flex-1"><${Setting} title="Vertical" tip="Whether your craft flies above, below, or at the same altitude as the leader." value=${slotFromOffset(config.ofsVertM, 'ABOVE', 'BELOW', 'LEVEL')} setfn=${mkslotfn('ofsVertM', 'ABOVE', 'BELOW')} type="select" options=${slotVertOptions} /><//>
+          <div class="flex-1"><${Setting} title="Vertical Gap" tip="Altitude difference to keep from the leader, in meters." value=${Math.abs(config.ofsVertM)} setfn=${mkgapfn('ofsVertM', 'ABOVE', 'BELOW')} type="number" addonRight="m" /><//>
+        <//>
       ` : html`
-        <${Setting} title="Longitudinal Offset" value=${config.ofsLongM} setfn=${mksetfn('ofsLongM')} type="number" addonRight="m" addonLeft="+ahead" />
-        <${Setting} title="Lateral Offset" value=${config.ofsLatM} setfn=${mksetfn('ofsLatM')} type="number" addonRight="m" addonLeft="+right" />
-        <${Setting} title="Vertical Offset" value=${config.ofsVertM} setfn=${mksetfn('ofsVertM')} type="number" addonRight="m" addonLeft="+above" />
+        <${Setting} title="Longitudinal Offset" tip="Signed distance along the leader's direction of travel: positive is ahead of the leader, negative is behind. This is the same value the friendly grid's Longitudinal fields edit." value=${config.ofsLongM} setfn=${mksetfn('ofsLongM')} type="number" addonRight="m" addonLeft="+ahead" />
+        <${Setting} title="Lateral Offset" tip="Signed sideways distance from the leader's flight path: positive is to the right, negative is to the left." value=${config.ofsLatM} setfn=${mksetfn('ofsLatM')} type="number" addonRight="m" addonLeft="+right" />
+        <${Setting} title="Vertical Offset" tip="Signed altitude difference from the leader: positive is above, negative is below." value=${config.ofsVertM} setfn=${mksetfn('ofsVertM')} type="number" addonRight="m" addonLeft="+above" />
       `}
     <//>
   <//>
@@ -198,10 +204,10 @@ export default function FollowPanel() {
       Trigger & Target
     <//>
     <div class="py-2 px-5 flex-1 flex flex-col relative">
-      <${Setting} title="Trigger Mode" value=${config.triggerMode} setfn=${() => {}} type="text" disabled=${true} />
-      <${Setting} title="Target Peer" value=${config.targetPeer} setfn=${mksetfn('targetPeer')} type="select" options=${targetPeerOptions} />
-      <${Setting} title="Emit Rate" value=${config.emitHz} setfn=${mksetfn('emitHz')} type="number" addonRight="Hz" />
-      <${Setting} title="Peer Timeout" value=${config.peerTimeoutMs} setfn=${mksetfn('peerTimeoutMs')} type="number" addonRight="ms" />
+      <${Setting} title="Trigger Mode" tip="How following gets switched on. This is fixed by firmware configuration and shown here for reference only." value=${config.triggerMode} setfn=${() => {}} type="text" disabled=${true} />
+      <${Setting} title="Target Peer" tip="Which other craft to follow. 'First Active' automatically locks onto the first peer heard broadcasting a valid position." value=${config.targetPeer} setfn=${mksetfn('targetPeer')} type="select" options=${targetPeerOptions} />
+      <${Setting} title="Emit Rate" tip="How often this craft broadcasts its own position and speed to peers, in updates per second. Higher rates give smoother following at the cost of more radio airtime." value=${config.emitHz} setfn=${mksetfn('emitHz')} type="number" addonRight="Hz" />
+      <${Setting} title="Peer Timeout" tip="How long to wait without hearing from the target peer before treating it as lost and releasing the follow lock." value=${config.peerTimeoutMs} setfn=${mksetfn('peerTimeoutMs')} type="number" addonRight="ms" />
     <//>
   <//>
 
@@ -210,10 +216,13 @@ export default function FollowPanel() {
       Heading
     <//>
     <div class="py-2 px-5 flex-1 flex flex-col relative">
-      <${Setting} title="Mode" value=${config.headingMode} setfn=${mksetfn('headingMode')} type="select" options=${headingModeOptions} />
+      <${Setting} title="Mode" tip="How this craft's nose direction is controlled while following: leave it alone, point it in the direction of travel, point it at the leader, hold a fixed compass heading, or offset it from the direction of travel." value=${config.headingMode} setfn=${mksetfn('headingMode')} type="select" options=${headingModeOptions} />
       ${(config.headingMode === 'FIXED' || config.headingMode === 'COURSE_RELATIVE') && html`
         <${Setting}
           title=${config.headingMode === 'FIXED' ? 'Heading (absolute)' : 'Heading Offset From Course'}
+          tip=${config.headingMode === 'FIXED'
+            ? 'Compass heading to hold, in degrees (0° = North, 90° = East).'
+            : 'Offset added to the direction-of-travel heading, in degrees. Positive turns the nose to the right of the direction of travel.'}
           value=${config.headingDeg} setfn=${mksetfn('headingDeg')} type="number" addonRight="°" />
       `}
     <//>
@@ -227,11 +236,11 @@ export default function FollowPanel() {
       ${saveResult && html`<${Notification} ok=${saveResult.status} text=${saveResult.message} close=${() => setSaveResult(null)} />`}
       ${validationError && html`<div class="text-sm text-red-600 mb-2">${validationError}<//>`}
 
-      <${Setting} title="Min Separation" value=${config.minSepM} setfn=${mksetfn('minSepM')} type="number" addonRight="m" />
-      <${Setting} title="Min Vertical Separation" value=${config.minVSepM} setfn=${mksetfn('minVSepM')} type="number" addonRight="m" />
-      <${Setting} title="Max Target Distance" value=${config.maxTargetDistM} setfn=${mksetfn('maxTargetDistM')} type="number" addonRight="m" />
-      <${Setting} title="Min Altitude Floor" value=${config.minAltM} setfn=${mksetfn('minAltM')} type="number" addonRight="m" />
-      <${Setting} title="Min Course Speed" value=${config.minCourseSpeed} setfn=${mksetfn('minCourseSpeed')} type="number" addonRight="m/s" />
+      <${Setting} title="Min Separation" tip="Smallest allowed 3D distance from the leader. A follow slot that works out to less than this is rejected." value=${config.minSepM} setfn=${mksetfn('minSepM')} type="number" addonRight="m" />
+      <${Setting} title="Min Vertical Separation" tip="When the follow slot sits directly above or below the leader with no horizontal offset, the smallest vertical gap allowed, to keep craft from stacking too close." value=${config.minVSepM} setfn=${mksetfn('minVSepM')} type="number" addonRight="m" />
+      <${Setting} title="Max Target Distance" tip="If the leader is ever farther away than this, following is aborted rather than letting this craft chase across an unbounded distance." value=${config.maxTargetDistM} setfn=${mksetfn('maxTargetDistM')} type="number" addonRight="m" />
+      <${Setting} title="Min Altitude Floor" tip="Lowest altitude this craft will ever be commanded to while following, regardless of the leader's altitude, so it won't be commanded into the ground." value=${config.minAltM} setfn=${mksetfn('minAltM')} type="number" addonRight="m" />
+      <${Setting} title="Min Course Speed" tip="Minimum ground speed the leader must be moving at for its direction of travel to be trusted as a heading reference. Below this speed, the last known direction is held instead of following GPS course jitter." value=${config.minCourseSpeed} setfn=${mksetfn('minCourseSpeed')} type="number" addonRight="m/s" />
 
       <div class="mb-1 mt-3 flex place-content-end"><${Button} icon=${Icons.save} onclick=${onsave} title="Apply" /><//>
     <//>

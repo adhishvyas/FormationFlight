@@ -5,6 +5,13 @@ import { Icons, Setting, Button, Notification, Colored, tipColors } from './comp
 // Permit using the web ui locally for development (mirrors main.js).
 const ENDPOINT_PREFIX = window.location.host != "192.168.4.1" ? "http://192.168.4.1" : "";
 
+// UI-only imperial readouts (spec says all inputs/values are metric on the
+// wire — these never leave the browser and are never sent back on save).
+const M_TO_FT = 3.28084;
+const MPS_TO_MPH = 2.23694;
+const asFt = m => `≈ ${(+m * M_TO_FT).toFixed(1)} ft`;
+const asMph = mps => `≈ ${(+mps * MPS_TO_MPH).toFixed(1)} mph`;
+
 // Mirrors FollowManager::applyConfig()'s stacked-slot epsilon
 // (src/lib/Follow/FollowManager.cpp) so client-side validation agrees with
 // the server-side check for the same config (spec §7.4 — both must exist,
@@ -181,20 +188,20 @@ export default function FollowPanel() {
       ${!advanced ? html`
         <div class="flex gap-4">
           <div class="flex-1"><${Setting} title="Longitudinal" tip="Whether your craft flies ahead of, behind, or level with the leader, measured along the leader's direction of travel." value=${slotFromOffset(config.ofsLongM, 'AHEAD', 'BEHIND', 'CENTER')} setfn=${mkslotfn('ofsLongM', 'AHEAD', 'BEHIND')} type="select" options=${slotLongOptions} /><//>
-          <div class="flex-1"><${Setting} title="Longitudinal Gap" tip="Distance to keep ahead of or behind the leader, in meters." value=${Math.abs(config.ofsLongM)} setfn=${mkgapfn('ofsLongM', 'AHEAD', 'BEHIND')} type="number" addonRight="m" /><//>
+          <div class="flex-1"><${Setting} title="Longitudinal Gap" tip="Distance to keep ahead of or behind the leader, in meters." value=${Math.abs(config.ofsLongM)} setfn=${mkgapfn('ofsLongM', 'AHEAD', 'BEHIND')} type="number" addonRight="m" imperial=${asFt(Math.abs(config.ofsLongM))} /><//>
         <//>
         <div class="flex gap-4">
           <div class="flex-1"><${Setting} title="Lateral" tip="Whether your craft flies to the left, right, or directly in line with the leader, viewed from behind the leader looking forward." value=${slotFromOffset(config.ofsLatM, 'RIGHT', 'LEFT', 'CENTER')} setfn=${mkslotfn('ofsLatM', 'RIGHT', 'LEFT')} type="select" options=${slotLatOptions} /><//>
-          <div class="flex-1"><${Setting} title="Lateral Gap" tip="Sideways distance to keep from the leader's flight path, in meters." value=${Math.abs(config.ofsLatM)} setfn=${mkgapfn('ofsLatM', 'RIGHT', 'LEFT')} type="number" addonRight="m" /><//>
+          <div class="flex-1"><${Setting} title="Lateral Gap" tip="Sideways distance to keep from the leader's flight path, in meters." value=${Math.abs(config.ofsLatM)} setfn=${mkgapfn('ofsLatM', 'RIGHT', 'LEFT')} type="number" addonRight="m" imperial=${asFt(Math.abs(config.ofsLatM))} /><//>
         <//>
         <div class="flex gap-4">
           <div class="flex-1"><${Setting} title="Vertical" tip="Whether your craft flies above, below, or at the same altitude as the leader." value=${slotFromOffset(config.ofsVertM, 'ABOVE', 'BELOW', 'LEVEL')} setfn=${mkslotfn('ofsVertM', 'ABOVE', 'BELOW')} type="select" options=${slotVertOptions} /><//>
-          <div class="flex-1"><${Setting} title="Vertical Gap" tip="Altitude difference to keep from the leader, in meters." value=${Math.abs(config.ofsVertM)} setfn=${mkgapfn('ofsVertM', 'ABOVE', 'BELOW')} type="number" addonRight="m" /><//>
+          <div class="flex-1"><${Setting} title="Vertical Gap" tip="Altitude difference to keep from the leader, in meters." value=${Math.abs(config.ofsVertM)} setfn=${mkgapfn('ofsVertM', 'ABOVE', 'BELOW')} type="number" addonRight="m" imperial=${asFt(Math.abs(config.ofsVertM))} /><//>
         <//>
       ` : html`
-        <${Setting} title="Longitudinal Offset" tip="Signed distance along the leader's direction of travel: positive is ahead of the leader, negative is behind. This is the same value the friendly grid's Longitudinal fields edit." value=${config.ofsLongM} setfn=${mksetfn('ofsLongM')} type="number" addonRight="m" addonLeft="+ahead" />
-        <${Setting} title="Lateral Offset" tip="Signed sideways distance from the leader's flight path: positive is to the right, negative is to the left." value=${config.ofsLatM} setfn=${mksetfn('ofsLatM')} type="number" addonRight="m" addonLeft="+right" />
-        <${Setting} title="Vertical Offset" tip="Signed altitude difference from the leader: positive is above, negative is below." value=${config.ofsVertM} setfn=${mksetfn('ofsVertM')} type="number" addonRight="m" addonLeft="+above" />
+        <${Setting} title="Longitudinal Offset" tip="Signed distance along the leader's direction of travel: positive is ahead of the leader, negative is behind. This is the same value the friendly grid's Longitudinal fields edit." value=${config.ofsLongM} setfn=${mksetfn('ofsLongM')} type="number" addonRight="m" addonLeft="+ahead" imperial=${asFt(config.ofsLongM)} />
+        <${Setting} title="Lateral Offset" tip="Signed sideways distance from the leader's flight path: positive is to the right, negative is to the left." value=${config.ofsLatM} setfn=${mksetfn('ofsLatM')} type="number" addonRight="m" addonLeft="+right" imperial=${asFt(config.ofsLatM)} />
+        <${Setting} title="Vertical Offset" tip="Signed altitude difference from the leader: positive is above, negative is below." value=${config.ofsVertM} setfn=${mksetfn('ofsVertM')} type="number" addonRight="m" addonLeft="+above" imperial=${asFt(config.ofsVertM)} />
       `}
     <//>
   <//>
@@ -236,11 +243,11 @@ export default function FollowPanel() {
       ${saveResult && html`<${Notification} ok=${saveResult.status} text=${saveResult.message} close=${() => setSaveResult(null)} />`}
       ${validationError && html`<div class="text-sm text-red-600 mb-2">${validationError}<//>`}
 
-      <${Setting} title="Min Separation" tip="Smallest allowed 3D distance from the leader. A follow slot that works out to less than this is rejected." value=${config.minSepM} setfn=${mksetfn('minSepM')} type="number" addonRight="m" />
-      <${Setting} title="Min Vertical Separation" tip="When the follow slot sits directly above or below the leader with no horizontal offset, the smallest vertical gap allowed, to keep craft from stacking too close." value=${config.minVSepM} setfn=${mksetfn('minVSepM')} type="number" addonRight="m" />
-      <${Setting} title="Max Target Distance" tip="If the leader is ever farther away than this, following is aborted rather than letting this craft chase across an unbounded distance." value=${config.maxTargetDistM} setfn=${mksetfn('maxTargetDistM')} type="number" addonRight="m" />
-      <${Setting} title="Min Altitude Floor" tip="Lowest altitude this craft will ever be commanded to while following, regardless of the leader's altitude, so it won't be commanded into the ground." value=${config.minAltM} setfn=${mksetfn('minAltM')} type="number" addonRight="m" />
-      <${Setting} title="Min Course Speed" tip="Minimum ground speed the leader must be moving at for its direction of travel to be trusted as a heading reference. Below this speed, the last known direction is held instead of following GPS course jitter." value=${config.minCourseSpeed} setfn=${mksetfn('minCourseSpeed')} type="number" addonRight="m/s" />
+      <${Setting} title="Min Separation" tip="Smallest allowed 3D distance from the leader. A follow slot that works out to less than this is rejected." value=${config.minSepM} setfn=${mksetfn('minSepM')} type="number" addonRight="m" imperial=${asFt(config.minSepM)} />
+      <${Setting} title="Min Vertical Separation" tip="When the follow slot sits directly above or below the leader with no horizontal offset, the smallest vertical gap allowed, to keep craft from stacking too close." value=${config.minVSepM} setfn=${mksetfn('minVSepM')} type="number" addonRight="m" imperial=${asFt(config.minVSepM)} />
+      <${Setting} title="Max Target Distance" tip="If the leader is ever farther away than this, following is aborted rather than letting this craft chase across an unbounded distance." value=${config.maxTargetDistM} setfn=${mksetfn('maxTargetDistM')} type="number" addonRight="m" imperial=${asFt(config.maxTargetDistM)} />
+      <${Setting} title="Min Altitude Floor" tip="Lowest altitude this craft will ever be commanded to while following, regardless of the leader's altitude, so it won't be commanded into the ground." value=${config.minAltM} setfn=${mksetfn('minAltM')} type="number" addonRight="m" imperial=${asFt(config.minAltM)} />
+      <${Setting} title="Min Course Speed" tip="Minimum ground speed the leader must be moving at for its direction of travel to be trusted as a heading reference. Below this speed, the last known direction is held instead of following GPS course jitter." value=${config.minCourseSpeed} setfn=${mksetfn('minCourseSpeed')} type="number" addonRight="m/s" imperial=${asMph(config.minCourseSpeed)} />
 
       <div class="mb-1 mt-3 flex place-content-end"><${Button} icon=${Icons.save} onclick=${onsave} title="Apply" /><//>
     <//>

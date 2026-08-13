@@ -191,11 +191,14 @@ export function Setting(props) {
   return html`
 <div class=${props.cls || 'grid grid-cols-2 gap-2 my-1'}>
   <label class="flex items-center text-sm text-gray-700 mr-2 font-medium">${props.title}<${Tooltip} text=${props.tip} /><//>
-  <div class="flex items-center">
-    ${props.type == 'switch' ? h(SwitchValue, props) :
-      props.type == 'select' ? h(SelectValue, props) :
-        props.type == 'file' ? h(FileValue, props) :
-          h(TextValue, props)}
+  <div class="flex flex-col">
+    <div class="flex items-center">
+      ${props.type == 'switch' ? h(SwitchValue, props) :
+        props.type == 'select' ? h(SelectValue, props) :
+          props.type == 'file' ? h(FileValue, props) :
+            h(TextValue, props)}
+    <//>
+    ${props.imperial && html`<span class="text-xs text-gray-400 mt-0.5">${props.imperial}<//>`}
   <//>
 <//>`;
 }

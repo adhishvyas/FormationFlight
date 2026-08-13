@@ -331,7 +331,7 @@ Work items:
 
 ---
 
-## Phase 4 — EEPROM persistence
+## Phase 4 — EEPROM persistence [Completed]
 
 **Depends on:** Phase 3D (mutates the same in-memory struct, now including the §7.7 heading fields) **and** the blocking team decision on the `ConfigHandler` reset behavior (see above) — this is the first phase that touches EEPROM. Internally sequential (4A → 4B → 4C → 4D).
 
@@ -341,6 +341,21 @@ Work items:
 - **4D — `html/main.js`**: a "Save permanently" control wired to 4C, visually distinct from 3C's live-apply controls (which only affect the in-memory struct). Reflects persisted-vs-unsaved state — e.g. disabled when the in-memory struct already matches the last-committed EEPROM values, and the "lost on reboot" banner from Phase 3 goes away once a commit succeeds.
 
 *Test:* spec §12.1 item 8 — edit a value via `POST /followmanager/config` (live, in-memory), confirm it takes effect but reverts on reboot without a commit; then call `POST /followmanager/commit`, reboot the follower (or bench unit), confirm the value survived this time (didn't revert to compile-time default). Confirm rapid repeated commits don't cause excessive EEPROM writes (the rate-limit/debounce actually engages).
+
+**Implemented, with deviations from the design above (decided with the user during implementation):**
+- **4A was already done.** `ConfigHandler.cpp:37`'s `true ||` short-circuit had already been removed in an earlier commit (`e4c3d44`), before this phase started — verified via `git log -p`. No code change was needed there; `cfg` already round-trips through EEPROM correctly.
+- **4D landed in `html/follow.js`, not `html/main.js`.** The Follow config panel lives in `follow.js` (built in Phase 3C), not `main.js`'s unrelated `Settings()` — the plan's file list was stale here.
+- **No persisted-vs-unsaved state tracking** (the "disabled when nothing's changed" / banner-removal half of 4D) — descoped by request to keep the button a plain always-clickable action. The "lost on reboot" banner was reworded instead of removed, since Apply-only edits are still session-only.
+
+Design notes not in the original plan:
+- `FollowRuntimeConfig`'s EEPROM mirror (`FollowEepromRecord`, `FollowManager.h`) carries its own `FOLLOW_EEPROM_VERSION`, independent of `cfg`'s `VERSION_CONFIG` — a fresh flash or future struct layout change is detected as "nothing saved yet" without touching `cfg`'s versioning.
+- `FollowManager::loadFromEEPROM()` reuses `applyConfig()`'s existing §7.4/sanity validation on the loaded record, so a corrupted or stale-schema EEPROM record can't silently arm follow with invalid geometry — it's discarded in favor of compile-time defaults instead.
+- The Follow EEPROM region sits at `sizeof(cfg)` (immediately after `cfg`'s own footprint), sized via `sizeof(FollowEepromRecord)`. `ConfigHandler.cpp`'s `config_init()` now calls `EEPROM.begin(sizeof(cfg) + sizeof(FollowEepromRecord))` instead of the old `sizeof(cfg) * 2`, which wasn't big enough to hold the new struct.
+- Commit rate-limiting is a flat 2s minimum interval inside `FollowManager::saveToEEPROM()` (`FOLLOW_EEPROM_COMMIT_MIN_INTERVAL_MS`), returning HTTP 429 on the `/followmanager/commit` endpoint when triggered — no separate debounce logic in `WiFiManager.cpp`.
+- `html/follow.js`'s "Save to EEPROM" button applies the current form to RAM first (same validation + `POST /followmanager/config` as the existing Apply button) and only calls `POST /followmanager/commit` if that succeeds, matching how a user expects a single "save permanently" action to behave.
+- Verified: `pio run -e diy_LoRa_Heltec_WiFi_LoRa_32_433_via_UART` builds successfully with all Phase 4 changes in place.
+
+*Test (still outstanding — bench, not yet run):* spec §12.1 item 8, as originally described above.
 
 ---
 

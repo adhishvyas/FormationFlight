@@ -181,6 +181,18 @@ WiFiManager::WiFiManager()
     // the result (spec §7.4 + basic sanity) and rejects the whole update if
     // it fails, rather than partially applying it.
     server->on("/followmanager/config", HTTP_POST, handleFollowManagerConfigPost);
+    // Phase 4C: explicit "flush the current in-memory config to EEPROM"
+    // action, distinct from 3B's live-edit POST above. Rate-limited inside
+    // FollowManager::saveToEEPROM() so rapid/duplicate clicks don't hammer
+    // EEPROM with writes.
+    server->on("/followmanager/commit", HTTP_POST, [](AsyncWebServerRequest *request) {
+        String errMsg;
+        if (!FollowManager::getSingleton()->saveToEEPROM(&errMsg)) {
+            request->send(429, "text/plain", errMsg);
+            return;
+        }
+        request->send(200, "text/plain", "OK");
+    });
     // OTA firmware updates
     server->on("/update", HTTP_POST, handleFileUploadResponse, handleFileUploadData);
     // 404

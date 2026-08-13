@@ -108,11 +108,15 @@ export default function FollowPanel() {
     [offsetKey]: offsetFromSlot(slotFromOffset(x[offsetKey], posLabel, negLabel, posLabel), gapM, posLabel, negLabel),
   })));
 
-  const onsave = () => {
+  // Posts the current form state to /followmanager/config (validate +
+  // apply to RAM only). Returns a promise resolving to whether the apply
+  // succeeded, so onsaveEeprom below knows whether it's safe to proceed to
+  // an EEPROM commit.
+  const applyLive = successMessage => {
     const err = validateConfig(config);
     if (err) {
       setValidationError(err);
-      return Promise.reject(new Error(err));
+      return Promise.resolve(false);
     }
     setValidationError(null);
 
@@ -134,9 +138,22 @@ export default function FollowPanel() {
 
     return fetch(ENDPOINT_PREFIX + '/followmanager/config', { method: 'POST', body })
       .then(r => r.ok
-        ? r.json().then(r => { applyFetchedConfig(r); setSaveResult({ status: true, message: 'Applied (live, session-only)' }); })
-        : r.text().then(t => setSaveResult({ status: false, message: t })));
+        ? r.json().then(r => { applyFetchedConfig(r); setSaveResult({ status: true, message: successMessage }); return true; })
+        : r.text().then(t => { setSaveResult({ status: false, message: t }); return false; }));
   };
+
+  const onsave = () => applyLive('Applied (live, session-only)');
+
+  // Phase 4D: applies the current form state to RAM (same as onsave), then
+  // — only if that succeeded — commits it to EEPROM (Phase 4C) so it
+  // survives a reboot.
+  const onsaveEeprom = () => applyLive('Applied — saving to EEPROM…').then(ok => {
+    if (!ok) return false;
+    return fetch(ENDPOINT_PREFIX + '/followmanager/commit', { method: 'POST' })
+      .then(r => r.ok
+        ? r.text().then(() => { setSaveResult({ status: true, message: 'Saved permanently to EEPROM' }); return true; })
+        : r.text().then(t => { setSaveResult({ status: false, message: 'Applied, but EEPROM save failed: ' + t }); return false; }));
+  });
 
   if (!config || !status || !peers) return '';
 
@@ -148,7 +165,7 @@ export default function FollowPanel() {
 <div class="m-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
   <div class="lg:col-span-2 bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-md px-4 py-2 text-sm flex items-center gap-2">
     <${Icons.info} class="w-5 h-5 shrink-0" />
-    Live edits only — changes apply immediately but are lost on reboot. Permanent (EEPROM) save isn't implemented yet.
+    Apply applies changes immediately but they're lost on reboot. Use Save to EEPROM to make them permanent.
   <//>
 
   <div class="py-1 divide-y border rounded bg-white flex flex-col">
@@ -249,7 +266,10 @@ export default function FollowPanel() {
       <${Setting} title="Min Altitude Floor" tip="Lowest altitude this craft will ever be commanded to while following, regardless of the leader's altitude, so it won't be commanded into the ground." value=${config.minAltM} setfn=${mksetfn('minAltM')} type="number" addonRight="m" imperial=${asFt(config.minAltM)} />
       <${Setting} title="Min Course Speed" tip="Minimum ground speed the leader must be moving at for its direction of travel to be trusted as a heading reference. Below this speed, the last known direction is held instead of following GPS course jitter." value=${config.minCourseSpeed} setfn=${mksetfn('minCourseSpeed')} type="number" addonRight="m/s" imperial=${asMph(config.minCourseSpeed)} />
 
-      <div class="mb-1 mt-3 flex place-content-end"><${Button} icon=${Icons.save} onclick=${onsave} title="Apply" /><//>
+      <div class="mb-1 mt-3 flex place-content-end gap-2">
+        <${Button} icon=${Icons.save} onclick=${onsave} title="Apply" />
+        <${Button} icon=${Icons.shield} onclick=${onsaveEeprom} title="Save to EEPROM" />
+      <//>
     <//>
   <//>
 <//>`;

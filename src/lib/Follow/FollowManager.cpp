@@ -3,6 +3,17 @@
 #include "../GNSS/GNSSManager.h"
 #include "main.h"
 #include <math.h>
+#include <EEPROM.h>
+
+// EEPROM region begins immediately after cfg's own footprint (main.h) —
+// see ConfigHandler.cpp's config_init(), which reserves
+// sizeof(cfg) + sizeof(FollowEepromRecord) total via EEPROM.begin() so
+// this region is always available once EEPROM.begin() has run.
+#define FOLLOW_EEPROM_OFFSET sizeof(cfg)
+
+// Minimum time between EEPROM commits (Phase 4B) — guards against a
+// stuck/spammed "Save to EEPROM" button hammering flash with writes.
+#define FOLLOW_EEPROM_COMMIT_MIN_INTERVAL_MS 2000
 
 // Below this horizontal offset magnitude, a slot is considered "stacked"
 // (overhead/underneath) for the purposes of the minimum-vertical-separation
@@ -50,6 +61,7 @@ FollowManager *FollowManager::getSingleton()
     if (followManager == nullptr)
     {
         followManager = new FollowManager();
+        followManager->loadFromEEPROM();
     }
     return followManager;
 }
@@ -481,5 +493,107 @@ bool FollowManager::applyConfig(const FollowRuntimeConfig &newConfig, String *er
     {
         forceReacquire();
     }
+    return true;
+}
+
+// Converts a runtime config to its narrower on-disk form (see
+// FollowEepromRecord's comment in FollowManager.h for why int16_t loses no
+// precision here). lround(), not a plain cast, so a value the UI couldn't
+// have produced anyway (e.g. one seeded from a compile-time #define with a
+// fractional value) rounds to the nearest representable integer instead of
+// silently truncating toward zero.
+static FollowEepromRecord toEepromRecord(const FollowRuntimeConfig &config)
+{
+    FollowEepromRecord record{};
+    record.version = FOLLOW_EEPROM_VERSION;
+
+    record.ofsLongM = (int16_t)lround(config.ofsLongM);
+    record.ofsLatM = (int16_t)lround(config.ofsLatM);
+    record.ofsVertM = (int16_t)lround(config.ofsVertM);
+
+    record.targetPeer = config.targetPeer;
+    record.emitHz = config.emitHz;
+    record.peerTimeoutMs = config.peerTimeoutMs;
+
+    record.minSepM = (int16_t)lround(config.minSepM);
+    record.minVSepM = (int16_t)lround(config.minVSepM);
+    record.maxTargetDistM = (int16_t)lround(config.maxTargetDistM);
+    record.minAltM = (int16_t)lround(config.minAltM);
+
+    record.minCourseSpeed = (int16_t)lround(config.minCourseSpeed);
+
+    record.headingMode = config.headingMode;
+    record.headingDeg = (int16_t)lround(config.headingDeg);
+
+    return record;
+}
+
+// Converts the on-disk record back to a runtime config. The int16_t->double
+// widening here is always exact (every integer int16_t can represent is
+// exactly representable as a double), so unlike toEepromRecord() above this
+// direction has no rounding to reason about.
+static FollowRuntimeConfig fromEepromRecord(const FollowEepromRecord &record)
+{
+    FollowRuntimeConfig config;
+
+    config.ofsLongM = record.ofsLongM;
+    config.ofsLatM = record.ofsLatM;
+    config.ofsVertM = record.ofsVertM;
+
+    config.targetPeer = record.targetPeer;
+    config.emitHz = record.emitHz;
+    config.peerTimeoutMs = record.peerTimeoutMs;
+
+    config.minSepM = record.minSepM;
+    config.minVSepM = record.minVSepM;
+    config.maxTargetDistM = record.maxTargetDistM;
+    config.minAltM = record.minAltM;
+
+    config.minCourseSpeed = record.minCourseSpeed;
+
+    config.headingMode = record.headingMode;
+    config.headingDeg = record.headingDeg;
+
+    return config;
+}
+
+void FollowManager::loadFromEEPROM()
+{
+    FollowEepromRecord record;
+    EEPROM.get(FOLLOW_EEPROM_OFFSET, record);
+    if (record.version != FOLLOW_EEPROM_VERSION)
+    {
+        // Fresh flash / nothing saved yet — keep the compile-time defaults
+        // FollowRuntimeConfig's member initializers already seeded.
+        return;
+    }
+    // Reuse applyConfig()'s validation (spec §7.4 + basic field sanity) so
+    // a corrupted or stale-schema record (bit flips, a struct layout that
+    // changed since it was written) can't silently arm follow with insane
+    // geometry. forceReacquire() is a no-op here — no peer lock exists yet
+    // at boot.
+    String errMsg;
+    if (!applyConfig(fromEepromRecord(record), &errMsg))
+    {
+        DBGF("[FollowManager] ignoring invalid EEPROM config: %s\n", errMsg.c_str());
+    }
+}
+
+bool FollowManager::saveToEEPROM(String *errMsg)
+{
+    String localErr;
+    if (!errMsg) errMsg = &localErr;
+
+    unsigned long now = millis();
+    if (lastEepromCommitMs != 0 && now - lastEepromCommitMs < FOLLOW_EEPROM_COMMIT_MIN_INTERVAL_MS)
+    {
+        *errMsg = "saved too recently, try again shortly";
+        return false;
+    }
+
+    FollowEepromRecord record = toEepromRecord(config);
+    EEPROM.put(FOLLOW_EEPROM_OFFSET, record);
+    EEPROM.commit();
+    lastEepromCommitMs = now;
     return true;
 }

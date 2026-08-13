@@ -2,6 +2,7 @@
 #include "ConfigHandler.h"
 #include <EEPROM.h>
 #include "ConfigStrings.h"
+#include "Follow/FollowManager.h"
 
 void config_clear()
 {
@@ -24,11 +25,13 @@ void config_save()
 
 void config_init(bool forcedefault)
 {
+    size_t cfgSize = sizeof(cfg);
+    // Reserve cfg's own footprint plus FollowManager's persisted region,
+    // which lives immediately after it (Phase 4B — see
+    // FollowManager::loadFromEEPROM()/saveToEEPROM()).
+    EEPROM.begin(cfgSize + sizeof(FollowEepromRecord));
 
-    size_t size = sizeof(cfg);
-    EEPROM.begin(size * 2);
-
-    for (size_t i = 0; i < size; i++)
+    for (size_t i = 0; i < cfgSize; i++)
     {
         char data = EEPROM.read(i);
         ((char *)&cfg)[i] = data;

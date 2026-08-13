@@ -61,6 +61,53 @@ struct FollowRuntimeConfig {
     double headingDeg = FOLLOW_HEADING_DEG;
 };
 
+// EEPROM persistence (Phase 4B): FollowRuntimeConfig's on-disk mirror, kept
+// as its own versioned record so a fresh/uninitialized EEPROM region (or a
+// future struct layout change) is detected independently of cfg's own
+// VERSION_CONFIG (main.h) — a version mismatch here just means "nothing
+// saved yet," not "corrupt," so FollowManager falls back to the
+// compile-time defaults FollowRuntimeConfig's member initializers already
+// seeded. Lives immediately after cfg's own EEPROM footprint — see
+// ConfigHandler.cpp's config_init(), which sizes EEPROM.begin() to fit both.
+//
+// FollowRuntimeConfig's geometry/timing fields are `double` because
+// FollowManager.cpp's target math combines them with GPS-derived doubles
+// (spec §6.2/§7.2/§7.3) — but the web UI can never actually produce a
+// fractional value for any of them: every type="number" field in
+// html/follow.js goes through html/components.js's TextValue, which calls
+// parseInt() on the input before it ever reaches state. So the EEPROM
+// mirror stores those fields as int16_t instead of double — a quarter the
+// size, with no precision loss for anything the UI can send — and
+// FollowManager.cpp's toEepromRecord()/fromEepromRecord() do the
+// int16_t<->double conversion in the one place it's needed. (int16_t's
+// +-32767 range comfortably covers every field here: offsets/distances in
+// meters, speed in m/s, heading in degrees.) targetPeer/emitHz/
+// peerTimeoutMs/headingMode are already integer types in
+// FollowRuntimeConfig, so they're carried through unchanged, no conversion
+// needed.
+#define FOLLOW_EEPROM_VERSION 2
+struct FollowEepromRecord {
+    uint16_t version;
+
+    int16_t ofsLongM;
+    int16_t ofsLatM;
+    int16_t ofsVertM;
+
+    uint8_t targetPeer;
+    uint16_t emitHz;
+    uint32_t peerTimeoutMs;
+
+    int16_t minSepM;
+    int16_t minVSepM;
+    int16_t maxTargetDistM;
+    int16_t minAltM;
+
+    int16_t minCourseSpeed;
+
+    FollowHeadingMode headingMode;
+    int16_t headingDeg;
+};
+
 // Projects a leader position + track-relative offset to an absolute lat/lon
 // (spec §7.2). peer_lat_1e6/peer_lon_1e6 are peer_t::gps's raw internal
 // representation (degrees x 1e6, see PeerManager.h / spec §5[A] — NOT the
@@ -87,10 +134,23 @@ public:
     // hatch). On failure, leaves the active config untouched, returns
     // false, and fills *errMsg.
     bool applyConfig(const FollowRuntimeConfig &newConfig, String *errMsg);
+    // Loads the persisted config from EEPROM if present and valid (Phase
+    // 4B). Called once at startup, after ConfigHandler's config_init() has
+    // already called EEPROM.begin(). Leaves the compile-time-seeded config
+    // untouched if there's nothing valid to load (fresh flash, version
+    // mismatch, or a record that fails applyConfig()'s validation).
+    void loadFromEEPROM();
+    // Persists the current in-memory config to its EEPROM region (Phase
+    // 4B) — an explicit action distinct from applyConfig()'s RAM-only
+    // mutation. Rate-limited so rapid repeated calls (e.g. accidental
+    // double-clicks) don't hammer EEPROM; on failure (including
+    // rate-limiting) returns false and fills *errMsg.
+    bool saveToEEPROM(String *errMsg);
     static FollowManager *getSingleton();
 
 private:
     FollowRuntimeConfig config;
+    unsigned long lastEepromCommitMs = 0;
     FollowLockState state = FOLLOW_LOCK_IDLE;
     uint8_t lockedId = 0;
     char lockedName[NAME_LENGTH + 1] = "";

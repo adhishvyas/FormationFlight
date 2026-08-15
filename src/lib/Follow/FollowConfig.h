@@ -101,3 +101,20 @@ enum FollowHeadingMode {
 #ifndef FOLLOW_HEADING_DEG
 #define FOLLOW_HEADING_DEG 0.0
 #endif
+
+// GVAR index for the primary lock-state indicator (spec §3), or -1 to
+// disable (default — zero MSP traffic, zero OSD dependency until a pilot
+// opts in via the web UI). INAV supports indices 0-7.
+#ifndef FOLLOW_STATUS_GVAR_INDEX
+#define FOLLOW_STATUS_GVAR_INDEX -1
+#endif
+
+// GVAR index for the secondary condition-code indicator (spec §3.2), or -1
+// to disable. Independent of FOLLOW_STATUS_GVAR_INDEX — a pilot can enable
+// either, both, or neither. Deliberately generic: only the altitude-floor
+// clamp (code 1) is implemented today, but the field/GVAR isn't scoped to
+// that one condition — future non-exclusive conditions get code 2, 3, etc.
+// on this same slot without another rename.
+#ifndef FOLLOW_CONDITION_FLAGS_GVAR_INDEX
+#define FOLLOW_CONDITION_FLAGS_GVAR_INDEX -1
+#endif

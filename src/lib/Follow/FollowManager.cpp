@@ -20,6 +20,13 @@
 // rule (spec §7.4).
 #define FOLLOW_STACKED_HORIZONTAL_EPSILON_M 0.5
 
+// How often to resend a GVAR even if its value hasn't changed, so a
+// single dropped MSP write doesn't leave the OSD showing a stale state
+// indefinitely (spec §3.3). 20x less frequent than the default 4 Hz
+// waypoint stream — negligible added MSP traffic (spec §8's "don't flood
+// MSP" budget, referenced by §3.3).
+#define FOLLOW_GVAR_HEARTBEAT_MS 5000
+
 FollowTarget slotToLatLon(int32_t peer_lat_1e6, int32_t peer_lon_1e6, double course_deg,
                           double long_m, double lat_m)
 {
@@ -308,12 +315,14 @@ void FollowManager::loop()
         lockedId = 0;
         lockedName[0] = '\0';
         haveValidCourse = false;
+        updateStatusGvars(false);
         return;
     }
 
     const peer_t *peer = resolveLock();
     if (peer == nullptr)
     {
+        updateStatusGvars(false);
         return; // ACQUIRING or LOCKED_HOLDING this cycle — nothing to emit
     }
 
@@ -341,13 +350,15 @@ void FollowManager::loop()
     // unlike targetSane() below, this must not suppress the waypoint —
     // the follower should keep tracking laterally and hold at the floor.
     int32_t floorCm = (int32_t)lround(config.minAltM * 100.0);
-    if (altCm < floorCm)
+    bool floorClamped = altCm < floorCm;
+    if (floorClamped)
     {
         altCm = floorCm;
     }
 
     if (!targetSane(offset, target))
     {
+        updateStatusGvars(floorClamped);
         return;
     }
 
@@ -357,6 +368,7 @@ void FollowManager::loop()
     int16_t headingDeg = resolveHeadingDeg(peer, courseDeg);
 
     MSPManager::getSingleton()->sendFollowWaypoint(target.lat_1e7, target.lon_1e7, altCm, headingDeg);
+    updateStatusGvars(floorClamped);
 
     haveLastTarget = true;
     lastTarget = target;
@@ -389,6 +401,70 @@ void FollowManager::statusJson(JsonDocument *doc)
         target["lon"] = lastTarget.lon_1e7;
         target["altCm"] = lastTargetAltCm;
         target["ageMs"] = millis() - lastTargetTime;
+    }
+    if (config.statusGvarIndex >= 0 && lastSentStatusGvarValue != INT32_MIN)
+    {
+        (*doc)["statusGvarValue"] = lastSentStatusGvarValue;
+    }
+    if (config.conditionFlagsGvarIndex >= 0 && lastSentConditionFlagsGvarValue != INT32_MIN)
+    {
+        (*doc)["conditionFlagsGvarValue"] = lastSentConditionFlagsGvarValue;
+    }
+}
+
+// Spec §3's status code. IDLE only appears transiently (loop() sets it
+// right before the gate-inactive early return, where floorClamped is
+// always passed as false) — included for completeness, not reachable
+// with a nonzero code.
+static int32_t statusGvarValue(FollowLockState state, uint8_t lockedId)
+{
+    switch (state)
+    {
+        case FOLLOW_LOCK_ACQUIRING:      return 1;
+        case FOLLOW_LOCK_LOCKED:         return 2;
+        // lockedId == 0 only happens here via the id-reuse-mismatch path
+        // in resolveLock() (spec §6.3 caveat of the parent spec) — see
+        // this plan's "ID LOST" decision above.
+        case FOLLOW_LOCK_LOCKED_HOLDING: return lockedId == 0 ? 4 : 3;
+        case FOLLOW_LOCK_IDLE:
+        default:                          return 0;
+    }
+}
+
+void FollowManager::updateStatusGvars(bool floorClamped)
+{
+    MSPManager *msp = MSPManager::getSingleton();
+    unsigned long now = millis();
+
+    if (config.statusGvarIndex >= 0)
+    {
+        int32_t value = statusGvarValue(state, lockedId);
+        bool due = lastSentStatusGvarValue == INT32_MIN
+                 || value != lastSentStatusGvarValue
+                 || (now - lastStatusGvarSendMs) >= FOLLOW_GVAR_HEARTBEAT_MS;
+        if (due)
+        {
+            msp->sendGvar((uint8_t)config.statusGvarIndex, value);
+            lastSentStatusGvarValue = value;
+            lastStatusGvarSendMs = now;
+        }
+    }
+
+    if (config.conditionFlagsGvarIndex >= 0)
+    {
+        // Only one condition exists today (altitude-floor clamp, spec
+        // §3.2 code 1); a future second condition adds another branch
+        // here, not another GVAR.
+        int32_t value = floorClamped ? 1 : 0;
+        bool due = lastSentConditionFlagsGvarValue == INT32_MIN
+                 || value != lastSentConditionFlagsGvarValue
+                 || (now - lastConditionFlagsGvarSendMs) >= FOLLOW_GVAR_HEARTBEAT_MS;
+        if (due)
+        {
+            msp->sendGvar((uint8_t)config.conditionFlagsGvarIndex, value);
+            lastSentConditionFlagsGvarValue = value;
+            lastConditionFlagsGvarSendMs = now;
+        }
     }
 }
 
@@ -439,6 +515,9 @@ void FollowManager::configJson(JsonDocument *doc) const
 
     (*doc)["headingMode"] = headingModeName(config.headingMode);
     (*doc)["headingDeg"] = config.headingDeg;
+
+    (*doc)["statusGvarIndex"] = config.statusGvarIndex;
+    (*doc)["conditionFlagsGvarIndex"] = config.conditionFlagsGvarIndex;
 }
 
 bool FollowManager::applyConfig(const FollowRuntimeConfig &newConfig, String *errMsg)
@@ -474,6 +553,16 @@ bool FollowManager::applyConfig(const FollowRuntimeConfig &newConfig, String *er
     if (newConfig.targetPeer > NODES_MAX)
     {
         *errMsg = "targetPeer out of range";
+        return false;
+    }
+    if (newConfig.statusGvarIndex < -1 || newConfig.statusGvarIndex > 7)
+    {
+        *errMsg = "statusGvarIndex must be -1 (disabled) or 0-7";
+        return false;
+    }
+    if (newConfig.conditionFlagsGvarIndex < -1 || newConfig.conditionFlagsGvarIndex > 7)
+    {
+        *errMsg = "conditionFlagsGvarIndex must be -1 (disabled) or 0-7";
         return false;
     }
 
@@ -525,6 +614,9 @@ static FollowEepromRecord toEepromRecord(const FollowRuntimeConfig &config)
     record.headingMode = config.headingMode;
     record.headingDeg = (int16_t)lround(config.headingDeg);
 
+    record.statusGvarIndex = config.statusGvarIndex;
+    record.conditionFlagsGvarIndex = config.conditionFlagsGvarIndex;
+
     return record;
 }
 
@@ -553,6 +645,9 @@ static FollowRuntimeConfig fromEepromRecord(const FollowEepromRecord &record)
 
     config.headingMode = record.headingMode;
     config.headingDeg = record.headingDeg;
+
+    config.statusGvarIndex = record.statusGvarIndex;
+    config.conditionFlagsGvarIndex = record.conditionFlagsGvarIndex;
 
     return config;
 }

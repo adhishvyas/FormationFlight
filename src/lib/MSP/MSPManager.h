@@ -39,6 +39,11 @@ public:
     // p1 == 0 as "no heading update," not due north, so callers must map a
     // computed heading of exactly 0 to 360 themselves (FollowManager does).
     void sendFollowWaypoint(int32_t lat_1e7, int32_t lon_1e7, int32_t alt_cm, int16_t headingDeg);
+    // Writes a single INAV Global Variable over MSP2_INAV_SET_GVAR (spec
+    // docs/spec/2026-08-13-FollowStatusOsdGvar.md). One-way, best-effort, no
+    // ACK wait. Silently no-ops if the connected FC isn't INAV 9.0+ (§2.2) —
+    // callers don't need to check support themselves.
+    void sendGvar(uint8_t index, int32_t value);
     void sendLocation(GNSSLocation location);
     void begin(Stream &stream);
     void statusJson(JsonDocument *doc);

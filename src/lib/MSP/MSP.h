@@ -83,6 +83,8 @@
 
 #define MSP2_SENSOR_GPS                 0x1F03 // INAV expects this, instead of MSP_SET_RAW_GPS
 
+#define MSP2_INAV_SET_GVAR              0x2214 // SET a Global Variable's value (INAV 9.0+)
+
 // bits of getActiveModes() return value
 #define MSP_MODE_ARM          0
 #define MSP_MODE_ANGLE        1
@@ -678,6 +680,17 @@ struct msp_set_wp_t {
   int16_t p3;       // not used
   uint8_t flag;     // 0xa5 = last, otherwise set to 0
 } __attribute__ ((packed));
+
+// MSP2_INAV_SET_GVAR command payload (INAV 9.0+). index is 0-7 (INAV
+// supports MAX_GLOBAL_VARIABLES == 8, verified against inav/src/main/
+// programming/global_variables.h); value is INAV's native int32
+// (verified against inav/src/main/fc/fc_msp.c's MSP2_INAV_SET_GVAR
+// handler, which requires exactly a 5-byte payload — not 2 bytes, despite
+// the parent spec's §2.1 text, corrected here).
+struct msp_set_gvar_t {
+  uint8_t index;
+  int32_t value;
+} __attribute__((packed));
 
 struct msp_radar_pos_t {
   uint8_t id;

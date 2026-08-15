@@ -283,6 +283,26 @@ void MSPManager::sendFollowWaypoint(int32_t lat_1e7, int32_t lon_1e7, int32_t al
     msp->command(MSP_SET_WP, &wp, sizeof(wp));
 }
 
+void MSPManager::sendGvar(uint8_t index, int32_t value)
+{
+    if (!ready || getFCVariant() != HOST_INAV)
+    {
+        return;
+    }
+    // getFCVersion() is already cached for the connection's lifetime
+    // (used today by Display.cpp's FC-version readout) — this adds no
+    // extra MSP traffic to check support (spec §2.2 Option A).
+    if (getFCVersion().versionMajor < 9)
+    {
+        return;
+    }
+
+    msp_set_gvar_t g{};
+    g.index = index;
+    g.value = value;
+    msp->command2(MSP2_INAV_SET_GVAR, &g, sizeof(g), 0); // fire-and-forget, mirrors sendRadar()
+}
+
 // Schedules the next transmission loop at the given timestamp
 void MSPManager::scheduleNextAt(unsigned long timestamp)
 {

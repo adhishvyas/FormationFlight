@@ -36,19 +36,27 @@ function offsetFromSlot(slot, gapM, posLabel, negLabel) {
 // Client-side mirror of FollowManager::applyConfig()'s validation
 // (spec §7.4 + basic field sanity). Blocks Save on failure; the server
 // re-validates independently, so this is a UX nicety, not the guard.
+// Returns { section, message } (section names the panel that owns the
+// offending field, so the error can render next to the inputs it's about)
+// or null if cfg is valid.
 function validateConfig(cfg) {
-  if (!(cfg.emitHz > 0)) return 'Emit rate must be > 0';
-  if (!(cfg.peerTimeoutMs > 0)) return 'Peer timeout must be > 0';
-  if (cfg.minSepM < 0 || cfg.minVSepM < 0 || cfg.minAltM < 0) return 'Min separation / vertical separation / altitude floor must be >= 0';
-  if (!(cfg.maxTargetDistM > 0)) return 'Max target distance must be > 0';
-  if (cfg.minCourseSpeed < 0) return 'Min course speed must be >= 0';
+  if (!(cfg.emitHz > 0)) return { section: 'trigger', message: 'Emit rate must be > 0' };
+  if (!(cfg.peerTimeoutMs > 0)) return { section: 'trigger', message: 'Peer timeout must be > 0' };
+  if (cfg.minSepM < 0 || cfg.minVSepM < 0 || cfg.minAltM < 0) {
+    return { section: 'bounds', message: 'Min separation / vertical separation / altitude floor must be >= 0' };
+  }
+  if (!(cfg.maxTargetDistM > 0)) return { section: 'bounds', message: 'Max target distance must be > 0' };
+  if (cfg.minCourseSpeed < 0) return { section: 'bounds', message: 'Min course speed must be >= 0' };
 
   const long = +cfg.ofsLongM, lat = +cfg.ofsLatM, vert = +cfg.ofsVertM;
   const horizontalMag = Math.sqrt(long * long + lat * lat);
   const mag3d = Math.sqrt(horizontalMag * horizontalMag + vert * vert);
-  if (mag3d < cfg.minSepM) return 'Slot magnitude is below Min Separation (spec §7.4)';
+  if (mag3d < cfg.minSepM) return { section: 'bounds', message: 'Slot magnitude is below Min Separation (spec §7.4)' };
   if (horizontalMag < STACKED_HORIZONTAL_EPSILON_M && Math.abs(vert) < cfg.minVSepM) {
-    return 'Stacked slot\'s vertical offset is below Min Vertical Separation (spec §7.4)';
+    return { section: 'bounds', message: 'Stacked slot\'s vertical offset is below Min Vertical Separation (spec §7.4)' };
+  }
+  if (cfg.statusGvarIndex !== -1 && cfg.statusGvarIndex === cfg.conditionFlagsGvarIndex) {
+    return { section: 'gvar', message: 'Status and Condition Flags GVAR indices must be different (or both Disabled)' };
   }
   return null;
 }
@@ -70,6 +78,7 @@ const headingModeOptions = [
   ['FIXED', 'Fixed Compass Heading'],
   ['COURSE_RELATIVE', 'Offset From Course'],
 ];
+const gvarIndexOptions = [[-1, 'Disabled']].concat([0,1,2,3,4,5,6,7].map(i => [i, String(i)]));
 
 export default function FollowPanel() {
   const [config, setConfig] = useState(null);
@@ -97,6 +106,12 @@ export default function FollowPanel() {
     const t = setInterval(() => { refreshStatus(); refreshPeers(); }, 1000);
     return () => clearInterval(t);
   }, []);
+
+  // Renders validationError inline, in red, but only within the panel it's
+  // actually about — avoids implying an error confined to one panel (e.g.
+  // Safety Bounds) when it may be about a field elsewhere on the page.
+  const sectionError = section => validationError && validationError.section === section &&
+    html`<div class="text-sm text-red-900 mb-2">${validationError.message}<//>`;
 
   const mksetfn = k => (v => setConfig(x => Object.assign({}, x, { [k]: v })));
   // Grid-view setters: recompute the canonical offset from a slot label or
@@ -136,6 +151,9 @@ export default function FollowPanel() {
     body.append('headingMode', config.headingMode);
     body.append('headingDeg', config.headingDeg);
 
+    body.append('statusGvarIndex', config.statusGvarIndex);
+    body.append('conditionFlagsGvarIndex', config.conditionFlagsGvarIndex);
+
     return fetch(ENDPOINT_PREFIX + '/followmanager/config', { method: 'POST', body })
       .then(r => r.ok
         ? r.json().then(r => { applyFetchedConfig(r); setSaveResult({ status: true, message: successMessage }); return true; })
@@ -163,11 +181,6 @@ export default function FollowPanel() {
 
   return html`
 <div class="m-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
-  <div class="lg:col-span-2 bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-md px-4 py-2 text-sm flex items-center gap-2">
-    <${Icons.info} class="w-5 h-5 shrink-0" />
-    Apply applies changes immediately but they're lost on reboot. Use Save to EEPROM to make them permanent.
-  <//>
-
   <div class="py-1 divide-y border rounded bg-white flex flex-col">
     <div class="font-light uppercase flex items-center text-gray-600 px-4 py-2">
       Status
@@ -225,13 +238,16 @@ export default function FollowPanel() {
 
   <div class="py-1 divide-y border rounded bg-white flex flex-col">
     <div class="font-light uppercase flex items-center text-gray-600 px-4 py-2">
-      Trigger & Target
+      Safety Bounds
     <//>
     <div class="py-2 px-5 flex-1 flex flex-col relative">
-      <${Setting} title="Trigger Mode" tip="How following gets switched on. This is fixed by firmware configuration and shown here for reference only." value=${config.triggerMode} setfn=${() => {}} type="text" disabled=${true} />
-      <${Setting} title="Target Peer" tip="Which other craft to follow. 'First Active' automatically locks onto the first peer heard broadcasting a valid position." value=${config.targetPeer} setfn=${mksetfn('targetPeer')} type="select" options=${targetPeerOptions} />
-      <${Setting} title="Emit Rate" tip="How often this craft broadcasts its own position and speed to peers, in updates per second. Higher rates give smoother following at the cost of more radio airtime." value=${config.emitHz} setfn=${mksetfn('emitHz')} type="number" addonRight="Hz" />
-      <${Setting} title="Peer Timeout" tip="How long to wait without hearing from the target peer before treating it as lost and releasing the follow lock." value=${config.peerTimeoutMs} setfn=${mksetfn('peerTimeoutMs')} type="number" addonRight="ms" />
+      ${sectionError('bounds')}
+
+      <${Setting} title="Min Separation" tip="Smallest allowed 3D distance from the leader. A follow slot that works out to less than this is rejected." value=${config.minSepM} setfn=${mksetfn('minSepM')} type="number" addonRight="m" imperial=${asFt(config.minSepM)} />
+      <${Setting} title="Min Vertical Separation" tip="When the follow slot sits directly above or below the leader with no horizontal offset, the smallest vertical gap allowed, to keep craft from stacking too close." value=${config.minVSepM} setfn=${mksetfn('minVSepM')} type="number" addonRight="m" imperial=${asFt(config.minVSepM)} />
+      <${Setting} title="Max Target Distance" tip="If the leader is ever farther away than this, following is aborted rather than letting this craft chase across an unbounded distance." value=${config.maxTargetDistM} setfn=${mksetfn('maxTargetDistM')} type="number" addonRight="m" imperial=${asFt(config.maxTargetDistM)} />
+      <${Setting} title="Min Altitude Floor" tip="Lowest altitude this craft will ever be commanded to while following, regardless of the leader's altitude, so it won't be commanded into the ground." value=${config.minAltM} setfn=${mksetfn('minAltM')} type="number" addonRight="m" imperial=${asFt(config.minAltM)} />
+      <${Setting} title="Min Course Speed" tip="Minimum ground speed the leader must be moving at for its direction of travel to be trusted as a heading reference. Below this speed, the last known direction is held instead of following GPS course jitter." value=${config.minCourseSpeed} setfn=${mksetfn('minCourseSpeed')} type="number" addonRight="m/s" imperial=${asMph(config.minCourseSpeed)} />
     <//>
   <//>
 
@@ -254,19 +270,37 @@ export default function FollowPanel() {
 
   <div class="py-1 divide-y border rounded bg-white flex flex-col">
     <div class="font-light uppercase flex items-center text-gray-600 px-4 py-2">
-      Safety Bounds
+      Trigger & Target
     <//>
     <div class="py-2 px-5 flex-1 flex flex-col relative">
+      ${sectionError('trigger')}
+      <${Setting} title="Trigger Mode" tip="How following gets switched on. This is fixed by firmware configuration and shown here for reference only." value=${config.triggerMode} setfn=${() => {}} type="text" disabled=${true} />
+      <${Setting} title="Target Peer" tip="Which other craft to follow. 'First Active' automatically locks onto the first peer heard broadcasting a valid position." value=${config.targetPeer} setfn=${mksetfn('targetPeer')} type="select" options=${targetPeerOptions} />
+      <${Setting} title="Emit Rate" tip="How often this craft broadcasts its own position and speed to peers, in updates per second. Higher rates give smoother following at the cost of more radio airtime." value=${config.emitHz} setfn=${mksetfn('emitHz')} type="number" addonRight="Hz" />
+      <${Setting} title="Peer Timeout" tip="How long to wait without hearing from the target peer before treating it as lost and releasing the follow lock." value=${config.peerTimeoutMs} setfn=${mksetfn('peerTimeoutMs')} type="number" addonRight="ms" />
+    <//>
+  <//>
+
+  <div class="py-1 divide-y border rounded bg-white flex flex-col">
+    <div class="font-light uppercase flex items-center text-gray-600 px-4 py-2">
+      OSD Status (GVAR)
+    <//>
+    <div class="py-2 px-5 flex-1 flex flex-col relative">
+      ${sectionError('gvar')}
+      <${Setting} title="Status GVAR Index" tip="Which INAV Global Variable to write the follow lock-state code to (0=inactive, 1=searching, 2=locked, 3=holding, 4=id lost). Configure a matching Custom OSD element in INAV Configurator to display it." value=${config.statusGvarIndex} setfn=${mksetfn('statusGvarIndex')} type="select" options=${gvarIndexOptions} />
+      <${Setting} title="Condition Flags GVAR Index" tip="Which INAV Global Variable to write a secondary condition code to. Currently the only condition is the altitude floor actively clamping the commanded altitude (0=no condition, 1=altitude floor clamped); more conditions may be added to this same slot in the future." value=${config.conditionFlagsGvarIndex} setfn=${mksetfn('conditionFlagsGvarIndex')} type="select" options=${gvarIndexOptions} />
+      <div class="text-xs text-gray-500 mt-2">Requires INAV 9.0 or later on the follower FC. Values are written but ignored on older firmware.</div>
+    <//>
+  <//>
+
+  <div class="lg:col-span-2 py-1 border rounded bg-white flex flex-col">
+    <div class="py-2 px-5 flex-1 flex flex-col relative">
+      <div class="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-md px-4 py-2 text-sm flex items-center gap-2 mb-2">
+        <${Icons.info} class="w-5 h-5 shrink-0" />
+        Apply applies changes immediately but they're lost on reboot. Use Save to EEPROM to make them permanent.
+      <//>
       ${saveResult && html`<${Notification} ok=${saveResult.status} text=${saveResult.message} close=${() => setSaveResult(null)} />`}
-      ${validationError && html`<div class="text-sm text-red-600 mb-2">${validationError}<//>`}
-
-      <${Setting} title="Min Separation" tip="Smallest allowed 3D distance from the leader. A follow slot that works out to less than this is rejected." value=${config.minSepM} setfn=${mksetfn('minSepM')} type="number" addonRight="m" imperial=${asFt(config.minSepM)} />
-      <${Setting} title="Min Vertical Separation" tip="When the follow slot sits directly above or below the leader with no horizontal offset, the smallest vertical gap allowed, to keep craft from stacking too close." value=${config.minVSepM} setfn=${mksetfn('minVSepM')} type="number" addonRight="m" imperial=${asFt(config.minVSepM)} />
-      <${Setting} title="Max Target Distance" tip="If the leader is ever farther away than this, following is aborted rather than letting this craft chase across an unbounded distance." value=${config.maxTargetDistM} setfn=${mksetfn('maxTargetDistM')} type="number" addonRight="m" imperial=${asFt(config.maxTargetDistM)} />
-      <${Setting} title="Min Altitude Floor" tip="Lowest altitude this craft will ever be commanded to while following, regardless of the leader's altitude, so it won't be commanded into the ground." value=${config.minAltM} setfn=${mksetfn('minAltM')} type="number" addonRight="m" imperial=${asFt(config.minAltM)} />
-      <${Setting} title="Min Course Speed" tip="Minimum ground speed the leader must be moving at for its direction of travel to be trusted as a heading reference. Below this speed, the last known direction is held instead of following GPS course jitter." value=${config.minCourseSpeed} setfn=${mksetfn('minCourseSpeed')} type="number" addonRight="m/s" imperial=${asMph(config.minCourseSpeed)} />
-
-      <div class="mb-1 mt-3 flex place-content-end gap-2">
+      <div class="flex place-content-end gap-2">
         <${Button} icon=${Icons.save} onclick=${onsave} title="Apply" />
         <${Button} icon=${Icons.shield} onclick=${onsaveEeprom} title="Save to EEPROM" />
       <//>

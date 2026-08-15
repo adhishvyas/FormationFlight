@@ -59,6 +59,12 @@ struct FollowRuntimeConfig {
     // FollowConfig.h's FollowHeadingMode).
     FollowHeadingMode headingMode = FOLLOW_HEADING_MODE;
     double headingDeg = FOLLOW_HEADING_DEG;
+
+    // GVAR indices (spec §3.4), -1 = disabled. Range enforced in
+    // applyConfig() (-1 or 0-7); the web UI additionally makes an
+    // out-of-range value structurally unreachable via a <select>.
+    int16_t statusGvarIndex = FOLLOW_STATUS_GVAR_INDEX;
+    int16_t conditionFlagsGvarIndex = FOLLOW_CONDITION_FLAGS_GVAR_INDEX;
 };
 
 // EEPROM persistence (Phase 4B): FollowRuntimeConfig's on-disk mirror, kept
@@ -85,7 +91,7 @@ struct FollowRuntimeConfig {
 // peerTimeoutMs/headingMode are already integer types in
 // FollowRuntimeConfig, so they're carried through unchanged, no conversion
 // needed.
-#define FOLLOW_EEPROM_VERSION 2
+#define FOLLOW_EEPROM_VERSION 3
 struct FollowEepromRecord {
     uint16_t version;
 
@@ -106,6 +112,9 @@ struct FollowEepromRecord {
 
     FollowHeadingMode headingMode;
     int16_t headingDeg;
+
+    int16_t statusGvarIndex;
+    int16_t conditionFlagsGvarIndex;
 };
 
 // Projects a leader position + track-relative offset to an absolute lat/lon
@@ -165,6 +174,15 @@ private:
     int32_t lastTargetAltCm = 0;
     unsigned long lastTargetTime = 0;
 
+    // Last value actually written to each GVAR (spec §3.3's change+heartbeat
+    // send rule), or INT32_MIN as a "never sent yet" sentinel so the very
+    // first loop() cycle always sends — this is what satisfies spec §3.1's
+    // "write 0 explicitly at startup," with no separate startup-only code path.
+    int32_t lastSentStatusGvarValue = INT32_MIN;
+    int32_t lastSentConditionFlagsGvarValue = INT32_MIN;
+    unsigned long lastStatusGvarSendMs = 0;
+    unsigned long lastConditionFlagsGvarSendMs = 0;
+
     bool followSwitchActive();
     // Advances the PeerLock state machine (spec §6.3) and returns the peer to
     // track this cycle, or nullptr if we're still acquiring or holding.
@@ -190,4 +208,14 @@ private:
     // remapped to 360, since INAV's WP#255 handler treats p1 == 0 as "no
     // heading update," not due north.
     int16_t resolveHeadingDeg(const peer_t *peer, double courseDeg) const;
+    // Derives this cycle's GVAR values from current state and sends whichever
+    // of the two configured GVARs (spec §3.4) changed or are due for their
+    // heartbeat resend (spec §3.3). floorClamped is the only condition
+    // updateStatusGvars() knows how to derive a conditionFlagsGvarIndex code
+    // from today (spec §3.2 — code 1); it's only meaningful when a waypoint
+    // was actually computed this cycle (peer resolved) — pass false from
+    // every other call site (spec §3.2's "write 0 on gate-inactive too"). A
+    // future second condition would extend this function's mapping, not its
+    // signature's meaning.
+    void updateStatusGvars(bool floorClamped);
 };

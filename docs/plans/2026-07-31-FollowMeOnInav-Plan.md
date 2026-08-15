@@ -389,3 +389,6 @@ Design notes not in the original plan:
 - `peer->id` reuse edge case — deferred to real multi-peer testing in Phases 1/5, per spec §13.
 - **Altitude floor (`FOLLOW_MIN_ALT_M`, spec §7.6) is now implemented** (see "Post-Phase 1 addendum" above) — bench test item §12.1 #10 (spoofed low/descending leader) is still outstanding, and the runtime-config/web-UI half rides along with Phase 3/4.
 - **Nose-heading control (`FOLLOW_HEADING_MODE`, spec §7.7) is planned but not yet implemented** — see "Phase 3D" above. Spec §13's open question on whether `NAV_COURSE_HOLD_MODE` can coincide with `GCS NAV` follow on a fixed-wing FC (which would make the FW controller actually consume the commanded `p1` instead of ignoring it) is unverified on real hardware; worth a bench check if/when a fixed-wing follower is ever tested, though fixed-wing followers remain out of scope (§1.3) otherwise.
+
+## Run the test Server to help test the UI
+`python3 .claude/skills/web-ui-preview/mock_server.py`

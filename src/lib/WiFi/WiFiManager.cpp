@@ -337,6 +337,9 @@ void handleFollowManagerConfigPost(AsyncWebServerRequest *request)
     }
     if (request->hasParam("headingDeg", true)) cfg.headingDeg = strParam("headingDeg").toDouble();
 
+    if (request->hasParam("statusGvarIndex", true)) cfg.statusGvarIndex = (int16_t)strParam("statusGvarIndex").toInt();
+    if (request->hasParam("conditionFlagsGvarIndex", true)) cfg.conditionFlagsGvarIndex = (int16_t)strParam("conditionFlagsGvarIndex").toInt();
+
     String errMsg;
     if (!FollowManager::getSingleton()->applyConfig(cfg, &errMsg)) {
         request->send(400, "text/plain", errMsg);

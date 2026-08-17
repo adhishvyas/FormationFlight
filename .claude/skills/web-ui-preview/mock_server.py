@@ -116,6 +116,7 @@ def followmanager_status():
         "state": "LOCKED", "gateActive": True,
         "lockedId": 1, "lockedName": "Falcon",
         "lastTarget": {"lat": 476410500, "lon": -1221405500, "altCm": 1450,
+                        "headingDeg": 270,
                         "ageMs": int((time.time() - START) * 1000) % 900},
     }
     if status_val is not None and status_val >= 0:

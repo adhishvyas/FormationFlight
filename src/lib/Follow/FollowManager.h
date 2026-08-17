@@ -197,6 +197,7 @@ private:
     bool haveLastTarget = false;
     FollowTarget lastTarget{};
     int32_t lastTargetAltCm = 0;
+    int16_t lastTargetHeadingDeg = 0;
     unsigned long lastTargetTime = 0;
 
     // Last value actually written to each GVAR (spec §3.3's change+heartbeat

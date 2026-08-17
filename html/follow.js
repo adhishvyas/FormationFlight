@@ -213,7 +213,7 @@ export default function FollowPanel() {
       ${status.lastTarget && html`
       <div class="grid grid-cols-2 gap-2 my-1">
         <label class="flex items-center text-sm text-gray-700 mr-2 font-medium">Last Target<//>
-        <span class="text-sm text-gray-700">${(status.lastTarget.lat / 1e7).toFixed(6)}, ${(status.lastTarget.lon / 1e7).toFixed(6)} @ ${(status.lastTarget.altCm / 100).toFixed(1)}m (${(status.lastTarget.ageMs / 1000).toFixed(1)}s ago)<//>
+        <span class="text-sm text-gray-700">${(status.lastTarget.lat / 1e7).toFixed(6)}, ${(status.lastTarget.lon / 1e7).toFixed(6)} @ ${(status.lastTarget.altCm / 100).toFixed(1)}m, hdg ${status.lastTarget.headingDeg}° (${(status.lastTarget.ageMs / 1000).toFixed(1)}s ago)<//>
       <//>
       `}
     <//>

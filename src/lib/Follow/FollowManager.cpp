@@ -20,6 +20,11 @@
 // rule (spec §7.4).
 #define FOLLOW_STACKED_HORIZONTAL_EPSILON_M 0.5
 
+// Tolerance for §4.6's "RC candidate must reproduce the static default"
+// pre-arm rule, below — absorbs RC read quantization/jitter (frac steps in
+// 1/500 increments) without weakening the check into a sign-only match.
+#define FOLLOW_PREARM_MATCH_EPSILON_M 0.05
+
 // How often to resend a GVAR even if its value hasn't changed, so a
 // single dropped MSP write doesn't leave the OSD showing a stale state
 // indefinitely (spec §3.3). 20x less frequent than the default 4 Hz
@@ -337,6 +342,35 @@ static bool candidateOffsetOk(const FollowOffset &candidate, const FollowOffset 
     return true;
 }
 
+// Pre-arm-only, stricter than Layer 1/Layer 2 above: requires every
+// RC-assigned axis's resolved candidate to exactly reproduce the saved
+// static default, not merely avoid the collision-risk geometry those
+// layers guard against. The pilot's stick must sit at the
+// one position (full deflection toward the default's sign, since
+// resolveAxisOffset() maps center to 0) that reproduces the configured
+// value, or the pre-arm warning stays lit. Axes with no RC channel
+// assigned always match trivially, since resolveAxisOffset() returns
+// configuredM verbatim for them.
+static bool rcCandidateMatchesStaticDefault(const FollowOffset &candidate, const FollowRuntimeConfig &config)
+{
+    if (config.rcLongChannel != -1 &&
+        fabs(candidate.longitudinal_m - config.ofsLongM) > FOLLOW_PREARM_MATCH_EPSILON_M)
+    {
+        return false;
+    }
+    if (config.rcLatChannel != -1 &&
+        fabs(candidate.lateral_m - config.ofsLatM) > FOLLOW_PREARM_MATCH_EPSILON_M)
+    {
+        return false;
+    }
+    if (config.rcVertChannel != -1 &&
+        fabs(candidate.vertical_m - config.ofsVertM) > FOLLOW_PREARM_MATCH_EPSILON_M)
+    {
+        return false;
+    }
+    return true;
+}
+
 double FollowManager::resolveAxisOffset(double configuredM, int16_t channel1Based) const
 {
     if (channel1Based < 1)
@@ -447,7 +481,13 @@ void FollowManager::loop()
         // not a real state transition.
         preArmCandidateOffset = resolveCandidateOffset();
         havePreArmCandidateOffset = true;
-        rcPreArmCheckFailed = !candidateOffsetOk(preArmCandidateOffset, lastKnownGood, config.minSepM, config.minVSepM);
+        // Two independent reasons to warn: the collision-geometry check
+        // (Layer 1/2) can still pass on a sign-flipped axis if the other
+        // two axes already clear minSepM on their own, so it alone doesn't
+        // guarantee RC agrees with the static default — the exact-match
+        // check below closes that gap.
+        rcPreArmCheckFailed = !candidateOffsetOk(preArmCandidateOffset, lastKnownGood, config.minSepM, config.minVSepM) ||
+                              !rcCandidateMatchesStaticDefault(preArmCandidateOffset, config);
     }
 
     if (!followSwitchActive())
@@ -560,6 +600,7 @@ void FollowManager::loop()
     haveLastTarget = true;
     lastTarget = target;
     lastTargetAltCm = altCm;
+    lastTargetHeadingDeg = headingDeg;
     lastTargetTime = millis();
     lastLiveOffset = offset; // spec §7 liveOffset
 }
@@ -588,6 +629,7 @@ void FollowManager::statusJson(JsonDocument *doc)
         target["lat"] = lastTarget.lat_1e7;
         target["lon"] = lastTarget.lon_1e7;
         target["altCm"] = lastTargetAltCm;
+        target["headingDeg"] = lastTargetHeadingDeg;
         target["ageMs"] = millis() - lastTargetTime;
     }
     if (config.statusGvarIndex >= 0 && lastSentStatusGvarValue != INT32_MIN)

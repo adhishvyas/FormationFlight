@@ -58,6 +58,11 @@ function validateConfig(cfg) {
   if (cfg.statusGvarIndex !== -1 && cfg.statusGvarIndex === cfg.conditionFlagsGvarIndex) {
     return { section: 'gvar', message: 'Status and Condition Flags GVAR indices must be different (or both Disabled)' };
   }
+
+  const rcChannels = [cfg.rcLongChannel, cfg.rcLatChannel, cfg.rcVertChannel].filter(c => c !== -1);
+  if (new Set(rcChannels).size !== rcChannels.length) {
+    return { section: 'rc', message: 'Each RC axis must use a different channel (or Disabled)' };
+  }
   return null;
 }
 
@@ -79,6 +84,7 @@ const headingModeOptions = [
   ['COURSE_RELATIVE', 'Offset From Course'],
 ];
 const gvarIndexOptions = [[-1, 'Disabled']].concat([0,1,2,3,4,5,6,7].map(i => [i, String(i)]));
+const rcChannelOptions = [[-1, 'Disabled']].concat(Array.from({length: 16}, (_, i) => [i + 1, String(i + 1)]));
 
 export default function FollowPanel() {
   const [config, setConfig] = useState(null);
@@ -153,6 +159,10 @@ export default function FollowPanel() {
 
     body.append('statusGvarIndex', config.statusGvarIndex);
     body.append('conditionFlagsGvarIndex', config.conditionFlagsGvarIndex);
+
+    body.append('rcLongChannel', config.rcLongChannel);
+    body.append('rcLatChannel', config.rcLatChannel);
+    body.append('rcVertChannel', config.rcVertChannel);
 
     return fetch(ENDPOINT_PREFIX + '/followmanager/config', { method: 'POST', body })
       .then(r => r.ok
@@ -244,7 +254,7 @@ export default function FollowPanel() {
       ${sectionError('bounds')}
 
       <${Setting} title="Min Separation" tip="Smallest allowed 3D distance from the leader. A follow slot that works out to less than this is rejected." value=${config.minSepM} setfn=${mksetfn('minSepM')} type="number" addonRight="m" imperial=${asFt(config.minSepM)} />
-      <${Setting} title="Min Vertical Separation" tip="When the follow slot sits directly above or below the leader with no horizontal offset, the smallest vertical gap allowed, to keep craft from stacking too close." value=${config.minVSepM} setfn=${mksetfn('minVSepM')} type="number" addonRight="m" imperial=${asFt(config.minVSepM)} />
+      <${Setting} title="Min Vertical Separation (when stacked)" tip="When the follow slot sits directly above or below the leader with no horizontal offset, the smallest vertical gap allowed, to keep craft from stacking too close." value=${config.minVSepM} setfn=${mksetfn('minVSepM')} type="number" addonRight="m" imperial=${asFt(config.minVSepM)} />
       <${Setting} title="Max Target Distance" tip="If the leader is ever farther away than this, following is aborted rather than letting this craft chase across an unbounded distance." value=${config.maxTargetDistM} setfn=${mksetfn('maxTargetDistM')} type="number" addonRight="m" imperial=${asFt(config.maxTargetDistM)} />
       <${Setting} title="Min Altitude Floor" tip="Lowest altitude this craft will ever be commanded to while following, regardless of the leader's altitude, so it won't be commanded into the ground." value=${config.minAltM} setfn=${mksetfn('minAltM')} type="number" addonRight="m" imperial=${asFt(config.minAltM)} />
       <${Setting} title="Min Course Speed" tip="Minimum ground speed the leader must be moving at for its direction of travel to be trusted as a heading reference. Below this speed, the last known direction is held instead of following GPS course jitter." value=${config.minCourseSpeed} setfn=${mksetfn('minCourseSpeed')} type="number" addonRight="m/s" imperial=${asMph(config.minCourseSpeed)} />
@@ -292,6 +302,37 @@ export default function FollowPanel() {
       <div class="text-xs text-gray-500 mt-2">Requires INAV 9.0 or later on the follower FC. Values are written but ignored on older firmware.</div>
     <//>
   <//>
+
+  <div class="py-1 divide-y border rounded bg-white flex flex-col">
+    <div class="font-light uppercase flex items-center text-gray-600 px-4 py-2">
+      RC Axis Control
+    <//>
+    <div class="py-2 px-5 flex-1 flex flex-col relative">
+      ${sectionError('rc')}
+      <div class="text-xs text-gray-500 mb-2">Once an axis has a channel assigned, its configured gap becomes a live-adjustable range (stick centered = centered slot, full deflection = the configured gap in that direction) rather than a fixed point.</div>
+      <${Setting} title="Longitudinal Channel" tip="RC channel that live-adjusts the longitudinal (ahead/behind) slot between -Gap and +Gap. Disabled uses the fixed configured value." value=${config.rcLongChannel} setfn=${mksetfn('rcLongChannel')} type="select" options=${rcChannelOptions} />
+      ${config.rcLongChannel !== -1 && config.ofsLongM === 0 && html`<div class="text-xs text-yellow-700 mb-2">Longitudinal Gap is 0 — this channel currently has no effect.<//>`}
+      <${Setting} title="Lateral Channel" tip="RC channel that live-adjusts the lateral (left/right) slot between -Gap and +Gap." value=${config.rcLatChannel} setfn=${mksetfn('rcLatChannel')} type="select" options=${rcChannelOptions} />
+      ${config.rcLatChannel !== -1 && config.ofsLatM === 0 && html`<div class="text-xs text-yellow-700 mb-2">Lateral Gap is 0 — this channel currently has no effect.<//>`}
+      <${Setting} title="Vertical Channel" tip="RC channel that live-adjusts the vertical (above/below) slot between -Gap and +Gap." value=${config.rcVertChannel} setfn=${mksetfn('rcVertChannel')} type="select" options=${rcChannelOptions} />
+      ${config.rcVertChannel !== -1 && config.ofsVertM === 0 && html`<div class="text-xs text-yellow-700 mb-2">Vertical Gap is 0 — this channel currently has no effect.<//>`}
+      <div class="text-xs text-gray-500 mt-2">Crossing a stacked or in-line axis from one side of the leader to the other requires first widening one of the other two RC-assigned axes past Min Separation — the slot won't fly through the leader to get there. This is expected behavior, not a bug.</div>
+      ${status.rcSlotFrozen && html`<div class="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-md px-3 py-2 text-sm mt-2">Slot is currently frozen at its last safe position — current RC input would produce an unsafe slot.<//>`}
+      ${status.liveOffset && html`<div class="text-xs text-gray-500 mt-2">Live offset: ${status.liveOffset.longM.toFixed(1)}m long, ${status.liveOffset.latM.toFixed(1)}m lat, ${status.liveOffset.vertM.toFixed(1)}m vert<//>`}
+      ${status.preArmCandidateOffset && html`<div class="text-xs text-gray-500 mt-2">Candidate offset (disarmed, bench-test): ${status.preArmCandidateOffset.longM.toFixed(1)}m long, ${status.preArmCandidateOffset.latM.toFixed(1)}m lat, ${status.preArmCandidateOffset.vertM.toFixed(1)}m vert<//>`}
+    <//>
+  <//>
+
+  ${status.rcPreArmCheckFailed && html`
+  <div class="lg:col-span-2 py-1 border rounded bg-white flex flex-col">
+    <div class="py-2 px-5 flex-1 flex flex-col relative">
+      <div class="bg-red-50 border border-red-200 text-red-800 rounded-md px-4 py-2 text-sm flex items-center gap-2">
+        <${Icons.info} class="w-5 h-5 shrink-0" />
+        Current RC stick/channel positions would produce an unsafe slot the instant follow engages. Center your sticks (or widen another RC-assigned axis) before arming.
+      <//>
+    <//>
+  <//>
+  `}
 
   <div class="lg:col-span-2 py-1 border rounded bg-white flex flex-col">
     <div class="py-2 px-5 flex-1 flex flex-col relative">

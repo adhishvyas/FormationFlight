@@ -56,6 +56,7 @@ DEFAULT_CONFIG = {
     # Pre-populated (rather than -1/disabled) so the OSD Status panel has
     # something to show without needing to be configured first.
     "statusGvarIndex": 0, "conditionFlagsGvarIndex": 1,
+    "rcLongChannel": -1, "rcLatChannel": -1, "rcVertChannel": -1,
 }
 CONFIG = copy.deepcopy(DEFAULT_CONFIG)
 
@@ -120,6 +121,18 @@ def followmanager_status():
         doc["statusGvarValue"] = 2  # LOCKED
     if cond_val is not None and cond_val >= 0:
         doc["conditionFlagsGvarValue"] = 0  # no altitude-floor clamp active
+    doc["liveOffset"] = {
+        "longM": CONFIG["ofsLongM"], "latM": CONFIG["ofsLatM"], "vertM": CONFIG["ofsVertM"],
+    }
+    doc["rcSlotFrozen"] = False
+    doc["rcPreArmCheckFailed"] = False
+    # Mirrors FollowManager.cpp's havePreArmCandidateOffset gating loosely
+    # (any RC axis assigned) for previewing the panel; real firmware also
+    # requires the craft to be disarmed, which this mock doesn't model.
+    if any(CONFIG[f] != -1 for f in ("rcLongChannel", "rcLatChannel", "rcVertChannel")):
+        doc["preArmCandidateOffset"] = {
+            "longM": CONFIG["ofsLongM"], "latM": CONFIG["ofsLatM"], "vertM": CONFIG["ofsVertM"],
+        }
     return doc
 
 
@@ -143,6 +156,10 @@ def validate_config(cfg):
     cgi = cfg.get("conditionFlagsGvarIndex", -1)
     if cgi < -1 or cgi > 7:
         return "conditionFlagsGvarIndex must be -1 (disabled) or 0-7"
+    for f in ("rcLongChannel", "rcLatChannel", "rcVertChannel"):
+        v = cfg.get(f, -1)
+        if v != -1 and (v < 1 or v > 16):
+            return f"{f} must be -1 (disabled) or 1-16"
     return None
 
 
@@ -194,7 +211,8 @@ class Handler(BaseHTTPRequestHandler):
             float_fields = ["ofsLongM", "ofsLatM", "ofsVertM", "minSepM", "minVSepM",
                              "maxTargetDistM", "minAltM", "minCourseSpeed", "headingDeg"]
             int_fields = ["targetPeer", "emitHz", "peerTimeoutMs",
-                          "statusGvarIndex", "conditionFlagsGvarIndex"]
+                          "statusGvarIndex", "conditionFlagsGvarIndex",
+                          "rcLongChannel", "rcLatChannel", "rcVertChannel"]
             for f in float_fields:
                 if f in params:
                     new_cfg[f] = float(params[f])

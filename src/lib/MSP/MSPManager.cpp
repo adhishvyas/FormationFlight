@@ -25,6 +25,24 @@ void MSPManager::begin(Stream &stream)
     ready = true;
 }
 
+// Returns the FC's active-mode bitmap (MSP_STATUS + MSP_BOXIDS), cached briefly
+// so getState()/isGCSNavActive() calls within the same cycle share one poll
+// instead of each triggering their own pair of MSP round trips.
+uint32_t MSPManager::getActiveModesCached()
+{
+    static uint32_t modes = 0;
+    static unsigned long cached = 0;
+
+    if (millis() - cached < 100)
+    {
+        return modes;
+    }
+
+    msp->getActiveModes(&modes);
+    cached = millis();
+    return modes;
+}
+
 // Returns the flight controller's state - 0 for disarmed, 1 for armed.
 uint8_t MSPManager::getState()
 {
@@ -32,9 +50,7 @@ uint8_t MSPManager::getState()
     {
         return 0;
     }
-    uint32_t modes;
-    msp->getActiveModes(&modes);
-    return bitRead(modes, 0);
+    return bitRead(getActiveModesCached(), 0);
 }
 
 // Returns whether GCS NAV is currently active on the FC (follow-mode trigger, §5[C] option 2).
@@ -44,9 +60,7 @@ bool MSPManager::isGCSNavActive()
     {
         return false;
     }
-    uint32_t modes;
-    msp->getActiveModes(&modes);
-    return bitRead(modes, MSP_MODE_GCSNAV);
+    return bitRead(getActiveModesCached(), MSP_MODE_GCSNAV);
 }
 
 // Requests the name of the flight controller over MSP without caching
@@ -168,6 +182,43 @@ int32_t MSPManager::local_altitude_cm()
     }
     cached = millis();
     return altitude.estimatedActualPosition;
+}
+
+// Cached MSP_RC poll (~100ms, matching local_altitude_cm()'s cadence) so
+// FollowManager::loop() at FOLLOW_EMIT_HZ always sees a fresh-enough read
+// (spec §3.3). Deliberately does NOT memset-on-failure the way
+// local_altitude_cm()/getAnalogValues() do (see this plan's corrections
+// note #2) — a dropped MSP_RC frame must not read as "channel near zero,"
+// so a failed request just leaves the last successfully parsed struct in
+// place. Polling only ever happens because a caller asked for a specific
+// channel, so a pilot with no axis RC-assigned costs zero extra MSP
+// traffic (spec §3.3) without this function needing its own enable flag.
+bool MSPManager::getRcChannelUs(uint8_t channel1Based, uint16_t *outUs)
+{
+    static msp_rc_t rc = {};
+    static unsigned long cached = 0;
+
+    if (channel1Based < 1 || channel1Based > MSP_MAX_SUPPORTED_CHANNELS)
+    {
+        return false;
+    }
+    if (!hostIsFlightController(this->getFCVariant()))
+    {
+        return false;
+    }
+
+    if (millis() - cached >= 100)
+    {
+        if (msp->request(MSP_RC, &rc, sizeof(rc)))
+        {
+            cached = millis();
+        }
+        // Poll miss: `rc` is left exactly as it was (MSP::recv() only
+        // touches the buffer on a checksum-valid response, MSP.cpp:104-144).
+    }
+
+    *outUs = rc.channelValue[channel1Based - 1];
+    return true;
 }
 
 // Sends a MSP request for the GPS position of the FC; will be all-zero if the request failed

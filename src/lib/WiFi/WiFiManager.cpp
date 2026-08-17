@@ -163,14 +163,14 @@ WiFiManager::WiFiManager()
     });
     // FollowManager
     server->on("/followmanager/status", HTTP_GET, [](AsyncWebServerRequest *request) {
-        StaticJsonDocument<512> doc;
+        StaticJsonDocument<768> doc;
         FollowManager::getSingleton()->statusJson(&doc);
         AsyncResponseStream *response = request->beginResponseStream("application/json");
         serializeJson(doc, *response);
         request->send(response);
     });
     server->on("/followmanager/config", HTTP_GET, [](AsyncWebServerRequest *request) {
-        StaticJsonDocument<768> doc;
+        StaticJsonDocument<896> doc;
         FollowManager::getSingleton()->configJson(&doc);
         AsyncResponseStream *response = request->beginResponseStream("application/json");
         serializeJson(doc, *response);
@@ -340,13 +340,17 @@ void handleFollowManagerConfigPost(AsyncWebServerRequest *request)
     if (request->hasParam("statusGvarIndex", true)) cfg.statusGvarIndex = (int16_t)strParam("statusGvarIndex").toInt();
     if (request->hasParam("conditionFlagsGvarIndex", true)) cfg.conditionFlagsGvarIndex = (int16_t)strParam("conditionFlagsGvarIndex").toInt();
 
+    if (request->hasParam("rcLongChannel", true)) cfg.rcLongChannel = (int16_t)strParam("rcLongChannel").toInt();
+    if (request->hasParam("rcLatChannel", true)) cfg.rcLatChannel = (int16_t)strParam("rcLatChannel").toInt();
+    if (request->hasParam("rcVertChannel", true)) cfg.rcVertChannel = (int16_t)strParam("rcVertChannel").toInt();
+
     String errMsg;
     if (!FollowManager::getSingleton()->applyConfig(cfg, &errMsg)) {
         request->send(400, "text/plain", errMsg);
         return;
     }
 
-    StaticJsonDocument<768> doc;
+    StaticJsonDocument<896> doc;
     FollowManager::getSingleton()->configJson(&doc);
     AsyncResponseStream *response = request->beginResponseStream("application/json");
     serializeJson(doc, *response);

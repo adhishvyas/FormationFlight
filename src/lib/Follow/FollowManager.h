@@ -65,6 +65,14 @@ struct FollowRuntimeConfig {
     // out-of-range value structurally unreachable via a <select>.
     int16_t statusGvarIndex = FOLLOW_STATUS_GVAR_INDEX;
     int16_t conditionFlagsGvarIndex = FOLLOW_CONDITION_FLAGS_GVAR_INDEX;
+
+    // RC axis control (spec §6): 1-based MSP_RC channel per axis, or -1 =
+    // disabled. Range enforced in applyConfig() (-1 or 1-16). The configured
+    // ofs{Long,Lat,Vert}M value becomes that axis's live-scaled bound once a
+    // channel is assigned (spec §2.2), not a fixed point.
+    int16_t rcLongChannel = FOLLOW_RC_LONG_CHANNEL;
+    int16_t rcLatChannel = FOLLOW_RC_LAT_CHANNEL;
+    int16_t rcVertChannel = FOLLOW_RC_VERT_CHANNEL;
 };
 
 // EEPROM persistence (Phase 4B): FollowRuntimeConfig's on-disk mirror, kept
@@ -91,7 +99,7 @@ struct FollowRuntimeConfig {
 // peerTimeoutMs/headingMode are already integer types in
 // FollowRuntimeConfig, so they're carried through unchanged, no conversion
 // needed.
-#define FOLLOW_EEPROM_VERSION 3
+#define FOLLOW_EEPROM_VERSION 4
 struct FollowEepromRecord {
     uint16_t version;
 
@@ -115,6 +123,10 @@ struct FollowEepromRecord {
 
     int16_t statusGvarIndex;
     int16_t conditionFlagsGvarIndex;
+
+    int16_t rcLongChannel;
+    int16_t rcLatChannel;
+    int16_t rcVertChannel;
 };
 
 // Projects a leader position + track-relative offset to an absolute lat/lon
@@ -183,6 +195,32 @@ private:
     unsigned long lastStatusGvarSendMs = 0;
     unsigned long lastConditionFlagsGvarSendMs = 0;
 
+    // "Last known good" RC-scaled offset triple (spec §4.4) — the freeze
+    // target when a candidate fails either safety layer. Bootstrapped to the
+    // compile-time static offset, matching FollowRuntimeConfig's own member
+    // initializers; applyConfig() resets this to the new config's static
+    // offset on every successful apply (spec §4.4's reset rule).
+    FollowOffset lastKnownGood{FOLLOW_OFS_LONG_M, FOLLOW_OFS_LAT_M, FOLLOW_OFS_VERT_M};
+    // Whether resolveOffset()'s last cycle held lastKnownGood frozen rather
+    // than adopting a fresh candidate (spec §4.4/§4.5), for statusJson()/
+    // updateStatusGvars().
+    bool rcSlotFrozen = false;
+    // §4.6's ground-only advisory result, recomputed every loop() cycle while
+    // disarmed and reset to false every cycle otherwise (spec §7's gating).
+    bool rcPreArmCheckFailed = false;
+    // The RC-scaled candidate §4.6's check evaluated this cycle, kept around
+    // so statusJson() can report actual numbers (not just pass/fail) for
+    // bench-testing RC scaling before arming. Same gating as
+    // rcPreArmCheckFailed — havePreArmCandidateOffset false whenever the
+    // craft isn't disarmed-with-an-axis-assigned, so a stale value never
+    // lingers into a cycle where it wasn't recomputed.
+    FollowOffset preArmCandidateOffset{};
+    bool havePreArmCandidateOffset = false;
+    // Offset triple actually used for the last emitted waypoint (spec §7
+    // liveOffset), distinct from lastKnownGood which persists even on a
+    // targetSane() rejection where no waypoint went out.
+    FollowOffset lastLiveOffset{};
+
     bool followSwitchActive();
     // Advances the PeerLock state machine (spec §6.3) and returns the peer to
     // track this cycle, or nullptr if we're still acquiring or holding.
@@ -194,8 +232,23 @@ private:
     // case regardless of what state this leaves behind.
     void forceReacquire();
     // Current config's canonical offset (spec §7.3), i.e. {ofsLongM,
-    // ofsLatM, ofsVertM} as a FollowOffset.
+    // ofsLatM, ofsVertM} as a FollowOffset, scaled live by any RC-assigned
+    // axis and passed through the two-layer geometry safety net (spec §3/§4).
     FollowOffset resolveOffset();
+    // Per-axis RC-to-offset mapping (spec §3.1/§3.2). channel1Based < 1 means
+    // "no channel assigned" -> returns configuredM unchanged (the only
+    // fallback case). Once a channel is assigned, whatever value comes back
+    // is mapped unconditionally, including a raw reading below 1000us -- it
+    // just clamps to the 1000 endpoint like any other out-of-range value
+    // (spec §3.1/§3.2). getRcChannelUs() returning false (no FC connected, or
+    // an out-of-MSP_RC-range channel number) is the one case where there's
+    // genuinely no value to map, so that also falls back to configuredM.
+    double resolveAxisOffset(double configuredM, int16_t channel1Based) const;
+    // {resolveAxisOffset(config.ofs{Long,Lat,Vert}M, config.rc{Long,Lat,Vert}Channel)}
+    // as a triple — shared by resolveOffset() and the §4.6 pre-arm check so
+    // both build the exact same candidate from the same inputs.
+    FollowOffset resolveCandidateOffset() const;
+    bool anyRcChannelAssigned() const;
     // Leader's usable track course in plain degrees, applying the
     // low-speed/stationary fallback (spec §7.5).
     double resolveCourseDeg(const peer_t *peer);
@@ -210,12 +263,9 @@ private:
     int16_t resolveHeadingDeg(const peer_t *peer, double courseDeg) const;
     // Derives this cycle's GVAR values from current state and sends whichever
     // of the two configured GVARs (spec §3.4) changed or are due for their
-    // heartbeat resend (spec §3.3). floorClamped is the only condition
-    // updateStatusGvars() knows how to derive a conditionFlagsGvarIndex code
-    // from today (spec §3.2 — code 1); it's only meaningful when a waypoint
-    // was actually computed this cycle (peer resolved) — pass false from
-    // every other call site (spec §3.2's "write 0 on gate-inactive too"). A
-    // future second condition would extend this function's mapping, not its
-    // signature's meaning.
-    void updateStatusGvars(bool floorClamped);
+    // heartbeat resend (spec §3.3). conditionCode is the caller-computed
+    // spec §5.3 0/1/2 value for conditionFlagsGvarIndex — callers combine the
+    // altitude-floor clamp and RC-freeze conditions (spec §5.1/§5.2) before
+    // calling this, so this function no longer derives it itself.
+    void updateStatusGvars(int32_t conditionCode);
 };

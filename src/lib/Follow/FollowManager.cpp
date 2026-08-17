@@ -172,11 +172,6 @@ void FollowManager::forceReacquire()
     lockedName[0] = '\0';
 }
 
-FollowOffset FollowManager::resolveOffset()
-{
-    return { config.ofsLongM, config.ofsLatM, config.ofsVertM };
-}
-
 double FollowManager::resolveCourseDeg(const peer_t *peer)
 {
     // peer->gps.groundSpeed is int16 cm/s; minCourseSpeed is human-facing
@@ -276,6 +271,122 @@ static bool offsetGeometrySane(const FollowOffset &offset, double minSepM, doubl
     return true;
 }
 
+// Layer 2 of spec §4: true if `axis` crossing from `referenceAxis`'s sign
+// to `candidateAxis`'s sign is unsafe right now. Only a genuine sign flip
+// counts as "crossing" (spec §4.3 condition 1) — 0 on either side is the
+// boundary itself, not a side, so it never counts as a flip. `coMag` is
+// the *smaller* of the other two axes' combined magnitude at the
+// reference point and at the candidate point (spec §4.3's conservative
+// choice, covering two RC-assigned axes swinging in the same cycle).
+static bool axisSignLocked(double candidateAxis, double referenceAxis,
+                            double candidateOther1, double candidateOther2,
+                            double referenceOther1, double referenceOther2,
+                            double minSepM)
+{
+    bool crossed = (candidateAxis > 0 && referenceAxis < 0) ||
+                   (candidateAxis < 0 && referenceAxis > 0);
+    if (!crossed)
+    {
+        return false;
+    }
+    double coMagCandidate = sqrt(candidateOther1 * candidateOther1 + candidateOther2 * candidateOther2);
+    double coMagReference = sqrt(referenceOther1 * referenceOther1 + referenceOther2 * referenceOther2);
+    double coMag = min(coMagCandidate, coMagReference);
+    return coMag < minSepM;
+}
+
+// Both safety layers (spec §4.2 Layer 1, §4.3 Layer 2), evaluated
+// together so there's exactly one pass/fail test. Shared, read-only,
+// between resolveOffset() (which adopts `candidate` as the new
+// lastKnownGood on a pass) and the §4.6 pre-arm advisory check (which
+// never mutates state) — both callers must always agree on the same
+// answer for the same inputs.
+static bool candidateOffsetOk(const FollowOffset &candidate, const FollowOffset &reference,
+                               double minSepM, double minVSepM)
+{
+    if (!offsetGeometrySane(candidate, minSepM, minVSepM, nullptr))
+    {
+        return false;
+    }
+    if (axisSignLocked(candidate.longitudinal_m, reference.longitudinal_m,
+                        candidate.lateral_m, candidate.vertical_m,
+                        reference.lateral_m, reference.vertical_m, minSepM))
+    {
+        return false;
+    }
+    if (axisSignLocked(candidate.lateral_m, reference.lateral_m,
+                        candidate.longitudinal_m, candidate.vertical_m,
+                        reference.longitudinal_m, reference.vertical_m, minSepM))
+    {
+        return false;
+    }
+    if (axisSignLocked(candidate.vertical_m, reference.vertical_m,
+                        candidate.longitudinal_m, candidate.lateral_m,
+                        reference.longitudinal_m, reference.lateral_m, minSepM))
+    {
+        return false;
+    }
+    return true;
+}
+
+double FollowManager::resolveAxisOffset(double configuredM, int16_t channel1Based) const
+{
+    if (channel1Based < 1)
+    {
+        return configuredM; // no channel assigned (spec §3.2)
+    }
+
+    uint16_t us;
+    if (!MSPManager::getSingleton()->getRcChannelUs((uint8_t)channel1Based, &us))
+    {
+        return configuredM; // no FC connected, or channel1Based out of MSP_RC's range (spec §3.2)
+    }
+    // Whatever value comes back is mapped as-is, including below 1000us --
+    // there is no separate "invalid reading" case once a channel is
+    // assigned (spec §3.2). The clamp below already guards over/under-
+    // travel, so this also covers an unpopulated channel index (reads 0us
+    // from the cached msp_rc_t, spec §2.1) the same way: it resolves to
+    // -gap, not a fallback to configuredM.
+
+    double gap = fabs(configuredM);
+    uint16_t usClamped = constrain(us, 1000, 2000);
+    double frac = ((double)usClamped - 1500.0) / 500.0; // -1.0 .. +1.0
+    return frac * gap;
+}
+
+bool FollowManager::anyRcChannelAssigned() const
+{
+    return config.rcLongChannel != -1 || config.rcLatChannel != -1 || config.rcVertChannel != -1;
+}
+
+FollowOffset FollowManager::resolveCandidateOffset() const
+{
+    return {
+        resolveAxisOffset(config.ofsLongM, config.rcLongChannel),
+        resolveAxisOffset(config.ofsLatM, config.rcLatChannel),
+        resolveAxisOffset(config.ofsVertM, config.rcVertChannel),
+    };
+}
+
+FollowOffset FollowManager::resolveOffset()
+{
+    FollowOffset candidate = resolveCandidateOffset();
+
+    bool ok = candidateOffsetOk(candidate, lastKnownGood, config.minSepM, config.minVSepM);
+    rcSlotFrozen = !ok;
+    if (ok)
+    {
+        lastKnownGood = candidate;
+    }
+    // On failure, lastKnownGood is left exactly as it was — the freeze
+    // (spec §4.4). When no axis has an RC channel assigned, `candidate`
+    // always equals lastKnownGood already (both are the static config,
+    // which applyConfig() guarantees is geometry-sane), so ok is always
+    // true and this is a no-op — today's plain static-offset behavior,
+    // unchanged.
+    return lastKnownGood;
+}
+
 bool FollowManager::targetSane(const FollowOffset &offset, const FollowTarget &target)
 {
     if (!offsetGeometrySane(offset, config.minSepM, config.minVSepM, nullptr))
@@ -309,20 +420,42 @@ void FollowManager::loop()
     }
     nextRunTime = millis() + (1000 / config.emitHz);
 
+    // spec §4.6: catch the common "RC disagrees with the static default's
+    // sign" bootstrap trap (spec §10) while still on the ground, where the
+    // pilot can simply move the stick before it matters mid-flight. Runs
+    // independent of the follow gate/GCS NAV (spec §4.6 — the point is to
+    // catch this before the pilot ever reaches for the switch, not just
+    // while follow is inactive), gated only on arm state so it can't freeze
+    // stale if the gate goes active before the pilot arms. Reset to false
+    // every cycle the craft isn't disarmed-with-an-axis-assigned, so it
+    // never reports stale while armed (spec §7's gating for rcPreArmCheckFailed).
+    rcPreArmCheckFailed = false;
+    havePreArmCandidateOffset = false;
+    if (MSPManager::getSingleton()->getState() == 0 && anyRcChannelAssigned())
+    {
+        // Read-only: deliberately does not touch lastKnownGood (spec §4.6's
+        // "never write to lastKnownGood" requirement) — this is a
+        // simulation of "what would happen if follow engaged right now,"
+        // not a real state transition.
+        preArmCandidateOffset = resolveCandidateOffset();
+        havePreArmCandidateOffset = true;
+        rcPreArmCheckFailed = !candidateOffsetOk(preArmCandidateOffset, lastKnownGood, config.minSepM, config.minVSepM);
+    }
+
     if (!followSwitchActive())
     {
         state = FOLLOW_LOCK_IDLE;
         lockedId = 0;
         lockedName[0] = '\0';
         haveValidCourse = false;
-        updateStatusGvars(false);
+        updateStatusGvars(rcPreArmCheckFailed ? 2 : 0);
         return;
     }
 
     const peer_t *peer = resolveLock();
     if (peer == nullptr)
     {
-        updateStatusGvars(false);
+        updateStatusGvars(0);
         return; // ACQUIRING or LOCKED_HOLDING this cycle — nothing to emit
     }
 
@@ -356,9 +489,38 @@ void FollowManager::loop()
         altCm = floorCm;
     }
 
+    // spec §5.1: attribute the clamp to RC only if the plain configured
+    // (non-RC-scaled) vertical offset would NOT also have clamped. When no
+    // channel is assigned to vertical, offset.vertical_m == config.ofsVertM
+    // by construction (§3.2), so this always agrees with the "actual" check
+    // and degrades to today's plain floor-clamp behavior with no special-casing.
+    bool floorAttributableToRc = false;
+    if (floorClamped)
+    {
+        // Reuses altCmD's already-computed local_altitude_cm()+relalt sum,
+        // just swapping in the static (non-RC-scaled) vertical offset,
+        // instead of re-deriving the whole sum from scratch.
+        double altCmStaticD = altCmD + (config.ofsVertM - offset.vertical_m) * 100.0;
+        int32_t altCmStatic = (int32_t)lround(altCmStaticD);
+        floorAttributableToRc = altCmStatic >= floorCm;
+    }
+
+    // spec §5.3's condition-code table: code 2 whenever either mechanism is
+    // active (they never disagree — see spec §5.2), otherwise code 1 if just
+    // the floor clamped for a reason unrelated to RC, otherwise 0.
+    int32_t conditionCode = 0;
+    if (floorClamped)
+    {
+        conditionCode = floorAttributableToRc ? 2 : 1;
+    }
+    if (rcSlotFrozen)
+    {
+        conditionCode = 2;
+    }
+
     if (!targetSane(offset, target))
     {
-        updateStatusGvars(floorClamped);
+        updateStatusGvars(conditionCode);
         return;
     }
 
@@ -368,12 +530,13 @@ void FollowManager::loop()
     int16_t headingDeg = resolveHeadingDeg(peer, courseDeg);
 
     MSPManager::getSingleton()->sendFollowWaypoint(target.lat_1e7, target.lon_1e7, altCm, headingDeg);
-    updateStatusGvars(floorClamped);
+    updateStatusGvars(conditionCode);
 
     haveLastTarget = true;
     lastTarget = target;
     lastTargetAltCm = altCm;
     lastTargetTime = millis();
+    lastLiveOffset = offset; // spec §7 liveOffset
 }
 
 static const char *lockStateName(FollowLockState state)
@@ -410,12 +573,27 @@ void FollowManager::statusJson(JsonDocument *doc)
     {
         (*doc)["conditionFlagsGvarValue"] = lastSentConditionFlagsGvarValue;
     }
+    if (haveLastTarget)
+    {
+        JsonObject live = doc->createNestedObject("liveOffset");
+        live["longM"] = lastLiveOffset.longitudinal_m;
+        live["latM"] = lastLiveOffset.lateral_m;
+        live["vertM"] = lastLiveOffset.vertical_m;
+        (*doc)["rcSlotFrozen"] = rcSlotFrozen;
+    }
+    if (havePreArmCandidateOffset)
+    {
+        JsonObject preArm = doc->createNestedObject("preArmCandidateOffset");
+        preArm["longM"] = preArmCandidateOffset.longitudinal_m;
+        preArm["latM"] = preArmCandidateOffset.lateral_m;
+        preArm["vertM"] = preArmCandidateOffset.vertical_m;
+    }
+    (*doc)["rcPreArmCheckFailed"] = rcPreArmCheckFailed;
 }
 
 // Spec §3's status code. IDLE only appears transiently (loop() sets it
-// right before the gate-inactive early return, where floorClamped is
-// always passed as false) — included for completeness, not reachable
-// with a nonzero code.
+// right before the gate-inactive early return) — included for
+// completeness, not reachable with a nonzero code.
 static int32_t statusGvarValue(FollowLockState state, uint8_t lockedId)
 {
     switch (state)
@@ -431,7 +609,7 @@ static int32_t statusGvarValue(FollowLockState state, uint8_t lockedId)
     }
 }
 
-void FollowManager::updateStatusGvars(bool floorClamped)
+void FollowManager::updateStatusGvars(int32_t conditionCode)
 {
     MSPManager *msp = MSPManager::getSingleton();
     unsigned long now = millis();
@@ -452,10 +630,7 @@ void FollowManager::updateStatusGvars(bool floorClamped)
 
     if (config.conditionFlagsGvarIndex >= 0)
     {
-        // Only one condition exists today (altitude-floor clamp, spec
-        // §3.2 code 1); a future second condition adds another branch
-        // here, not another GVAR.
-        int32_t value = floorClamped ? 1 : 0;
+        int32_t value = conditionCode; // spec §5.3's 0/1/2 table, computed by callers now
         bool due = lastSentConditionFlagsGvarValue == INT32_MIN
                  || value != lastSentConditionFlagsGvarValue
                  || (now - lastConditionFlagsGvarSendMs) >= FOLLOW_GVAR_HEARTBEAT_MS;
@@ -518,6 +693,10 @@ void FollowManager::configJson(JsonDocument *doc) const
 
     (*doc)["statusGvarIndex"] = config.statusGvarIndex;
     (*doc)["conditionFlagsGvarIndex"] = config.conditionFlagsGvarIndex;
+
+    (*doc)["rcLongChannel"] = config.rcLongChannel;
+    (*doc)["rcLatChannel"] = config.rcLatChannel;
+    (*doc)["rcVertChannel"] = config.rcVertChannel;
 }
 
 bool FollowManager::applyConfig(const FollowRuntimeConfig &newConfig, String *errMsg)
@@ -565,6 +744,21 @@ bool FollowManager::applyConfig(const FollowRuntimeConfig &newConfig, String *er
         *errMsg = "conditionFlagsGvarIndex must be -1 (disabled) or 0-7";
         return false;
     }
+    if (newConfig.rcLongChannel != -1 && (newConfig.rcLongChannel < 1 || newConfig.rcLongChannel > MSP_MAX_SUPPORTED_CHANNELS))
+    {
+        *errMsg = "rcLongChannel must be -1 (disabled) or 1-16";
+        return false;
+    }
+    if (newConfig.rcLatChannel != -1 && (newConfig.rcLatChannel < 1 || newConfig.rcLatChannel > MSP_MAX_SUPPORTED_CHANNELS))
+    {
+        *errMsg = "rcLatChannel must be -1 (disabled) or 1-16";
+        return false;
+    }
+    if (newConfig.rcVertChannel != -1 && (newConfig.rcVertChannel < 1 || newConfig.rcVertChannel > MSP_MAX_SUPPORTED_CHANNELS))
+    {
+        *errMsg = "rcVertChannel must be -1 (disabled) or 1-16";
+        return false;
+    }
 
     // Spec §7.4 geometry rules, evaluated against the config's canonical
     // offset — mirrors targetSane()'s two config-only checks so a config
@@ -578,6 +772,11 @@ bool FollowManager::applyConfig(const FollowRuntimeConfig &newConfig, String *er
 
     bool targetPeerChanged = (newConfig.targetPeer != config.targetPeer);
     config = newConfig;
+    // §4.4: a config change (new gaps, a reassigned channel) can make the
+    // previously-frozen triple meaningless, so re-anchor it to the new
+    // static offset — the one point applyConfig() already guarantees is
+    // geometry-sane via the offsetGeometrySane() check above.
+    lastKnownGood = { config.ofsLongM, config.ofsLatM, config.ofsVertM };
     if (targetPeerChanged)
     {
         forceReacquire();
@@ -617,6 +816,10 @@ static FollowEepromRecord toEepromRecord(const FollowRuntimeConfig &config)
     record.statusGvarIndex = config.statusGvarIndex;
     record.conditionFlagsGvarIndex = config.conditionFlagsGvarIndex;
 
+    record.rcLongChannel = config.rcLongChannel;
+    record.rcLatChannel = config.rcLatChannel;
+    record.rcVertChannel = config.rcVertChannel;
+
     return record;
 }
 
@@ -648,6 +851,10 @@ static FollowRuntimeConfig fromEepromRecord(const FollowEepromRecord &record)
 
     config.statusGvarIndex = record.statusGvarIndex;
     config.conditionFlagsGvarIndex = record.conditionFlagsGvarIndex;
+
+    config.rcLongChannel = record.rcLongChannel;
+    config.rcLatChannel = record.rcLatChannel;
+    config.rcVertChannel = record.rcVertChannel;
 
     return config;
 }

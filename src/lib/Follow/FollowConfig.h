@@ -118,3 +118,17 @@ enum FollowHeadingMode {
 #ifndef FOLLOW_CONDITION_FLAGS_GVAR_INDEX
 #define FOLLOW_CONDITION_FLAGS_GVAR_INDEX -1
 #endif
+
+// RC axis control (spec docs/spec/2026-08-15-FollowRcAxisControl.md §6),
+// 1-based MSP_RC channel number per axis, or -1 to disable (default — zero
+// MSP_RC polling until a pilot opts in via the web UI, same -1-disables-
+// by-default pattern as the GVAR index fields above).
+#ifndef FOLLOW_RC_LONG_CHANNEL
+#define FOLLOW_RC_LONG_CHANNEL -1
+#endif
+#ifndef FOLLOW_RC_LAT_CHANNEL
+#define FOLLOW_RC_LAT_CHANNEL -1
+#endif
+#ifndef FOLLOW_RC_VERT_CHANNEL
+#define FOLLOW_RC_VERT_CHANNEL -1
+#endif

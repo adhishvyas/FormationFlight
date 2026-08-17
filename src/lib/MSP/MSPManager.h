@@ -31,6 +31,15 @@ public:
     int32_t local_altitude_cm();
     // Whether the FC currently has GCS NAV active (MSP_MODE_GCSNAV), e.g. for follow-mode gating.
     bool isGCSNavActive();
+    // Reads a single RC channel's value (µs) from the FC over a cached MSP_RC
+    // poll (spec docs/spec/2026-08-15-FollowRcAxisControl.md §2.1/§9).
+    // channel1Based is 1-16 (MSP_MAX_SUPPORTED_CHANNELS). Returns false (and
+    // leaves *outUs untouched) only if not connected to a flight controller or
+    // channel1Based is out of range. A transient poll miss on an otherwise-
+    // connected FC is NOT one of those failure cases — it returns the last
+    // successfully parsed value from the cache instead, same reasoning
+    // local_altitude_cm()'s cache already rides out a single dropped frame.
+    bool getRcChannelUs(uint8_t channel1Based, uint16_t *outUs);
     void sendRadar(const peer_t *peer);
     // Sends the INAV follow-me special waypoint #255 via MSP_SET_WP.
     // Requires NAV POSHOLD + GCS NAV active on the follower FC.
@@ -62,6 +71,11 @@ private:
     unsigned long nextSendTime = 0;
     // Which peer we'll send next
     uint8_t peerIndex = 0;
+
+    // Cached MSP_STATUS+MSP_BOXIDS active-mode bitmap (MSP::getActiveModes()
+    // is itself two MSP round trips) shared by getState() and
+    // isGCSNavActive() so calling both in the same cycle costs one poll, not two.
+    uint32_t getActiveModesCached();
 
     uint8_t mapFixType2Msp(GNSS_FIX_TYPE fixType);
 };

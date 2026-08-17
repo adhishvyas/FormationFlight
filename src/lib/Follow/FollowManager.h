@@ -269,10 +269,14 @@ private:
     // Commanded nose heading for this cycle, resolved per config.headingMode
     // (spec §7.7). courseDeg is the already-computed resolveCourseDeg()
     // result, reused here instead of recomputed. Returns 0 for
-    // FOLLOW_HEADING_OFF (the "don't touch heading" wire sentinel);
-    // otherwise wraps into [1, 359] — INAV's WP#255 handler only applies a
-    // heading update when 0 < p1 < 360 (both ends exclusive), so a computed
-    // value of exactly 0/360 is remapped to 1, not 360.
+    // FOLLOW_HEADING_OFF (this function's own "don't send a heading" wire
+    // sentinel, consumed by loop() before calling MSPManager::sendSetHead() —
+    // also passed through to sendFollowWaypoint()'s p1, see that function's
+    // comment for why that's currently a forward-compatible no-op rather than
+    // the live mechanism); otherwise wraps into [1, 359] — a computed value
+    // of exactly 0/360 is remapped to 1 to avoid colliding with that
+    // sentinel, and incidentally keeps it inside WP#255 p1's (0, 360)
+    // exclusive range too (MSP_SET_HEAD itself has no such restriction).
     int16_t resolveHeadingDeg(const peer_t *peer, double courseDeg) const;
     // Derives this cycle's GVAR values from current state and sends whichever
     // of the two configured GVARs (spec §3.4) changed or are due for their

@@ -236,12 +236,16 @@ int16_t FollowManager::resolveHeadingDeg(const peer_t *peer, double courseDeg) c
     }
     if (deg == 0)
     {
-        // INAV's WP#255 handler only applies a heading update when
-        // 0 < p1 < 360 (both ends exclusive — navigation.c, setWaypoint()).
-        // p1 == 0 means "leave heading alone," and p1 == 360 is *also*
-        // rejected by the same check, so it can't be used as a stand-in for
-        // due north either. Nudge to 1° instead — imperceptible in flight,
-        // and inside the valid range.
+        // 0 is this function's own "don't update heading" wire sentinel (the
+        // default: case above) — a computed heading that legitimately wraps
+        // to exactly 0/360 (due north) would collide with it, so nudge to 1°
+        // instead. Imperceptible in flight. This also happens to keep the
+        // value inside WP#255's p1 range (INAV's setWaypoint() only applies
+        // p1 when 0 < p1 < 360, both ends exclusive) — currently moot since
+        // p1 is inert for a follower in NAV POSHOLD_3D (see
+        // MSPManager::sendFollowWaypoint()'s comment), but harmless to keep
+        // valid there too against the day that changes. MSP_SET_HEAD itself
+        // has no such range restriction.
         deg = 1;
     }
     return (int16_t)deg;
@@ -535,7 +539,22 @@ void FollowManager::loop()
 
     updateDebugGvars(target.lat_1e7, target.lon_1e7, altCm, headingDeg);
 
-    MSPManager::getSingleton()->sendFollowWaypoint(target.lat_1e7, target.lon_1e7, altCm, headingDeg);
+    MSPManager *msp = MSPManager::getSingleton();
+    // headingDeg is also passed to sendFollowWaypoint() below (WP#255's p1) —
+    // currently inert on INAV 9.x for a follower in NAV POSHOLD_3D, kept as a
+    // forward-compatible best-effort write (see that function's comment).
+    // sendSetHead() (MSP_SET_HEAD) is the mechanism that actually works today.
+    msp->sendFollowWaypoint(target.lat_1e7, target.lon_1e7, altCm, headingDeg);
+    // headingDeg == 0 is FOLLOW_HEADING_OFF's wire sentinel (resolveHeadingDeg()
+    // never returns 0 for any other mode — see its comment) — skip sending in
+    // that case rather than commanding due north. isHeadingHoldActive() gates
+    // on INAV's own HEADING HOLD box being active, the precondition for this
+    // target to actually reach the yaw-rate PID while in NAV POSHOLD_3D
+    // (see MSPManager::sendSetHead()'s comment for why).
+    if (headingDeg != 0 && msp->isHeadingHoldActive())
+    {
+        msp->sendSetHead(headingDeg);
+    }
     updateStatusGvars(conditionCode);
 
     haveLastTarget = true;

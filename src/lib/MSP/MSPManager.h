@@ -44,10 +44,36 @@ public:
     // Sends the INAV follow-me special waypoint #255 via MSP_SET_WP.
     // Requires NAV POSHOLD + GCS NAV active on the follower FC.
     // headingDeg: commanded nose heading in degrees, 1-360 (spec §7.7), or 0
-    // to leave heading untouched this cycle — INAV's WP#255 handler treats
-    // p1 == 0 as "no heading update," not due north, so callers must map a
-    // computed heading of exactly 0 to 360 themselves (FollowManager does).
+    // to leave heading untouched this cycle — callers must map a computed
+    // heading of exactly 0 to 360 themselves (FollowManager does). Kept as a
+    // best-effort, forward-compatible write: verified against current INAV
+    // firmware source that NAV_STATE_POSHOLD_3D_IN_PROGRESS (the nav state
+    // this requires) lacks NAV_REQUIRE_MAGHOLD, so INAV's yaw-rate PID never
+    // actually consumes this p1 write today (see sendSetHead()'s comment for
+    // the full mechanism) — it's a currently-inert no-op on the FC, not a
+    // bug on our end. Left in place (rather than hardcoded to 0) so that if
+    // INAV ever extends POSHOLD_3D to honor it — or a follower ends up in
+    // some other NAV_REQUIRE_MAGHOLD state — FF already sends the right
+    // value with no code change needed.
     void sendFollowWaypoint(int32_t lat_1e7, int32_t lon_1e7, int32_t alt_cm, int16_t headingDeg);
+    // Explicitly sets INAV's heading-hold target via MSP_SET_HEAD (spec
+    // §7.7), decoupled from the WP#255 position stream above and, today, the
+    // *only* path that actually works for a follower in NAV POSHOLD_3D.
+    // Unlike WP#255's p1, this command has no gating in INAV's handler — it
+    // always writes — but the yaw-rate PID only ever reads that target when
+    // getHeadingHoldState() reports HEADING_HOLD_ENABLED, which for a
+    // follower sitting in NAV POSHOLD_3D requires INAV's own HEADING HOLD
+    // ("MAG") box to be active (see isHeadingHoldActive()). Callers must gate
+    // on that themselves; sending this with the box inactive is a silent
+    // no-op on the FC, not an error. headingDeg: degrees, any value (no
+    // (0,360) exclusive restriction the way WP#255's p1 had).
+    void sendSetHead(int16_t headingDeg);
+    // Whether INAV's HEADING HOLD ("MAG") box is active on the connected FC
+    // (MSP_MODE_MAG bit of getActiveModes()) — the precondition for
+    // sendSetHead()'s target to actually reach the yaw-rate PID while the
+    // follower is in NAV POSHOLD_3D (spec §7.7 follow-up; see sendSetHead()'s
+    // comment for why WP#255's p1 alone was never sufficient here).
+    bool isHeadingHoldActive();
     // Writes a single INAV Global Variable over MSP2_INAV_SET_GVAR (spec
     // docs/spec/2026-08-13-FollowStatusOsdGvar.md). One-way, best-effort, no
     // ACK wait. Silently no-ops if the connected FC isn't INAV 9.0+ (§2.2) —

@@ -104,7 +104,7 @@ These values are dictated by INAV and must not be changed:
 - **action:** **1** (`MSP_NAV_STATUS_WAYPOINT_ACTION_WAYPOINT`, already `#define`d in `src/lib/MSP/MSP.h:410`). Setting action = 0 makes the message invalid.
 - **lat / lon:** `int32`, degrees × **1e7**.
 - **alt:** `int32`, **centimeters**. Home-relative when p3 bit0 = 0.
-- **p1:** **heading, in whole degrees, or `0` for "don't update heading."** This is a special-cased meaning of `p1` scoped to **waypoint #255 only** — for ordinary mission waypoints (1–60), `p1` means cruise speed (cm/s) instead; do not read the two as the same field just because they share an offset. See §7.7 for the full mechanism and why this — not a second MSP message — is how nose-heading control is implemented.
+- **p1:** still sent as **heading, in whole degrees, or `0` for "don't update heading"** (`p1` otherwise means cruise speed cm/s on ordinary mission waypoints 1–60) — but **as of §7.7's 2026-08-17 correction, this write is currently inert** for a follower in `NAV POSHOLD_3D`; it never reaches the yaw-rate PID on INAV 9.x regardless of value. Kept as a forward-compatible best-effort write (free — same message, no extra MSP traffic) in case INAV ever extends `POSHOLD_3D` to honor it. The command that actually works today is the separate `MSP_SET_HEAD` (§7.7).
 - **p2, p3, flag:** all **0** for our use (p3 bit0 = 0 ⇒ altitude relative to home; do not set AMSL).
 
 Payload layout (21 bytes, little-endian) — **this struct already exists in FF's codebase**, verbatim, at `src/lib/MSP/MSP.h:670-680` as `msp_set_wp_t` (packed):
@@ -166,10 +166,11 @@ Ship #1 to get flying; move to #2 for the production behavior (unchanged recomme
 
 ```cpp
 // MSP_SET_WP (#209) — INAV follow-me special waypoint #255.
-// Requires NAV POSHOLD + GCS NAV active on the follower FC.
-// headingDeg: 0 = don't update heading (unchanged from before §7.7); otherwise
-// 1-360, degrees. Caller is responsible for the 0->360 wrap (§7.7) — INAV's
-// own WP255 handler treats an incoming 0 as "no heading," not "due north."
+// Requires NAV POSHOLD + GCS NAV active on the follower FC. headingDeg (p1)
+// is still sent as of the §7.7 correction above, but is currently inert on
+// INAV 9.x for a follower in NAV POSHOLD_3D — kept as a forward-compatible
+// best-effort write in case INAV extends POSHOLD_3D to honor it; see
+// sendSetHead() for the mechanism that actually works today.
 void MSPManager::sendFollowWaypoint(int32_t lat_1e7, int32_t lon_1e7, int32_t alt_cm, int16_t headingDeg) {
     msp_set_wp_t wp{};
     wp.waypointNumber = 255;
@@ -180,6 +181,15 @@ void MSPManager::sendFollowWaypoint(int32_t lat_1e7, int32_t lon_1e7, int32_t al
     wp.p1 = headingDeg; wp.p2 = 0; wp.p3 = 0;
     wp.flag = 0;
     msp->command(MSP_SET_WP, &wp, sizeof(wp));
+}
+
+// MSP_SET_HEAD (#211) — §7.7 correction: the actual heading path. Callers
+// must gate on MSPManager::isHeadingHoldActive() (INAV's HEADING HOLD box) —
+// see §7.7 for why the write is otherwise a silent no-op on the FC.
+void MSPManager::sendSetHead(int16_t headingDeg) {
+    msp_set_head_t head{};
+    head.magHoldHeading = headingDeg;
+    msp->command(MSP_SET_HEAD, &head, sizeof(head));
 }
 ```
 
@@ -220,13 +230,23 @@ void FollowManager::loop() {
 
     if (!follow_target_sane(p, tgt, alt_cm)) return;    // sanity bounds (§7.4)
 
-    // Nose heading (§7.7) — independent of the position target above.
-    // Resolves to the 1-360 wire value directly (0 => FOLLOW_HEADING_OFF,
-    // "don't touch heading"); computed the same way regardless of whether
-    // the follower is a rotorcraft or fixed-wing (§7.7 — no craft-type branch).
+    // Nose heading (§7.7, corrected 2026-08-17). Resolves to the 1-360 wire
+    // value directly (0 => FOLLOW_HEADING_OFF, "don't send a heading");
+    // computed the same way regardless of whether the follower is a
+    // rotorcraft or fixed-wing (§7.7 — no craft-type branch).
     int16_t headingDeg = follow_resolve_heading_deg(p, courseDeg);
 
+    // headingDeg also rides along in p1 here — currently inert on INAV 9.x
+    // for a follower in NAV POSHOLD_3D (kept forward-compatible; see §7.7 and
+    // MSPManager::sendFollowWaypoint()'s comment), NOT the live mechanism.
     mspManager->sendFollowWaypoint(tgt.lat_1e7, tgt.lon_1e7, alt_cm, headingDeg);
+
+    // The independent MSP_SET_HEAD send below is what actually steers the
+    // aircraft today — gated on INAV's HEADING HOLD box being active (§7.7
+    // correction explains why that gate, not p1 above, is load-bearing).
+    if (headingDeg != 0 && mspManager->isHeadingHoldActive()) {
+        mspManager->sendSetHead(headingDeg);
+    }
 }
 ```
 
@@ -360,7 +380,7 @@ Distinct from §7.4's vertical-separation rule, which governs the offset *relati
 
 For a fixed-wing follower, nose orientation and direction of travel are the same thing by construction (bank-to-turn flight). For a rotorcraft, they aren't — a multirotor can translate in any direction without yawing, so §6's position-only WP#255 stream leaves the nose wherever it last was (pilot stick input / whatever heading it happened to have), unrelated to the direction it's actually flying. This section adds independent control over the commanded heading.
 
-**Mechanism: `p1` on WP#255 itself, not a second MSP message.** Verified against INAV firmware source (`navigation.c`, `setWaypoint()`), the WP#255 special-case handler already reads `p1` as a heading:
+**Mechanism (original, now superseded — see correction below): `p1` on WP#255 itself.** Verified against INAV firmware source (`navigation.c`, `setWaypoint()`), the WP#255 special-case handler reads `p1` as a heading:
 
 ```c
 // INAV navigation.c, setWaypoint(), wpNumber == 255 branch
@@ -370,9 +390,19 @@ if (wpData->p1 > 0 && wpData->p1 < 360) {
 setDesiredPosition(&wpPos.pos, DEGREES_TO_CENTIDEGREES(wpData->p1), waypointUpdateFlags);
 ```
 
-This is purpose-built for exactly this use: `p1` (whole degrees) is written straight to `posControl.desiredState.yaw` when nonzero and in range. No second MSP command (e.g. `MSP_SET_HEAD`, #211), no additional INAV flight mode (e.g. `HEADING LOCK`) — the same `isGCSValid()` precondition that already gates the position stream (`ARMED`, `EST_TRUSTED`, GCS-assisted-nav enabled, `NAV_STATE_POSHOLD_3D_IN_PROGRESS`) also gates this. This supersedes an earlier design draft that proposed `MSP_SET_HEAD` + a `HEADING LOCK` box — rejected in favor of this because it needs one message instead of two and no new FC-side mode/AUX wiring.
+`p1` (whole degrees) is written straight to `posControl.desiredState.yaw` when nonzero and in range — this part of the original analysis was correct as far as it went. What it missed: writing `desiredState.yaw` is necessary but **not sufficient** for the value to reach the motors. See the correction below.
 
-**`p1` range gotcha:** the firmware condition is `p1 > 0 && p1 < 360` — **both ends are exclusive.** `p1 == 0` is reserved and means "leave heading alone," not "point due north" — but `p1 == 360` is *also* rejected by the same check (it fails `p1 < 360`), so it cannot be used as a stand-in for due north either. A computed heading that rounds to exactly 0°/360° must be sent as `1` instead (imperceptible in flight, and inside the valid `(0, 360)` range), or that cycle's heading update is silently skipped. `resolveHeadingDeg()` (`FollowManager.cpp`) owns this wrap; do not reintroduce a bare `% 360` at the call site, and do not remap to `360`.
+**`p1` range gotcha (still accurate background, no longer load-bearing):** the firmware condition is `p1 > 0 && p1 < 360` — both ends exclusive. `p1 == 0` means "leave heading alone," and `p1 == 360` is *also* rejected by the same check. A computed heading that rounds to exactly 0°/360° was sent as `1` instead. `resolveHeadingDeg()` (`FollowManager.cpp`) still performs this wrap today, but now to avoid colliding with its own `0` sentinel, not because of `p1`'s restriction — see the correction below.
+
+**Correction (2026-08-17): `p1` never actually worked for a multirotor follower, and the fix is `MSP_SET_HEAD`, not `p1`.** Field testing on INAV 9.x showed the commanded heading was never honored. Re-verified against INAV firmware source (`navigation.c`, `navigation_multicopter.c`, `flight/pid.c`) turned up the missing half of the picture:
+
+- Writing `posControl.desiredState.yaw` (via `p1`) only reaches the yaw-rate PID controller when `getHeadingHoldState()` (`pid.c`) returns `HEADING_HOLD_ENABLED`. That function checks `navigationGetHeadingControlState()` (`navigation.c`) first, which returns `NAV_HEADING_CONTROL_AUTO` — the condition that would make our `desiredState.yaw` write matter — **only if the FSM state's `stateFlags` include `NAV_REQUIRE_MAGHOLD`**.
+- `NAV_STATE_POSHOLD_3D_IN_PROGRESS` — the nav state `isGCSValid()` requires, i.e. the *only* state follow-me ever runs in — does **not** carry `NAV_REQUIRE_MAGHOLD` (`navigation.c`'s FSM state table; contrast with the RTH/WAYPOINT/CRUISE states, which do). So `navigationGetHeadingControlState()` always returns `NAV_HEADING_CONTROL_NONE` for a follower in follow-me flight, and `p1`'s write to `desiredState.yaw`, however correctly formed, was structurally inert — it could never reach the motors via this path, independent of the `(0, 360)` range gotcha above.
+- `getHeadingHoldState()`'s only other path to `HEADING_HOLD_ENABLED` is `ABS(rcCommand[YAW]) == 0 && FLIGHT_MODE(HEADING_MODE)` — INAV's own **HEADING HOLD** box (`BOXHEADINGHOLD`, historically called "MAG") must be active on the follower, assigned to an AUX switch, independent of and in addition to `NAV POSHOLD`/`GCS NAV`.
+
+**Mechanism (current): `MSP_SET_HEAD` (#211), sent only while the HEADING HOLD box is active — plus `p1` kept as a forward-compatible best-effort write.** `MSP_SET_HEAD`'s handler (`fc_msp.c`) is unconditional — `updateHeadingHoldTarget(tmp_u16)`, no `isGCSValid()`-style gate, no `(0, 360)` range check — so it's a strictly more direct write than `p1` ever was, decoupled from the position stream. But since the *consuming* side (the yaw-rate PID) still requires `HEADING_HOLD_ENABLED` exactly as above, FF must check the box is active before sending, or the send is a silent no-op on the FC. `MSPManager::isHeadingHoldActive()` reads this off the existing `getActiveModes()`/`MSP_STATUS` bitmap FF already polls for `isGCSNavActive()` (`MSP_MODE_MAG`, bit 4, `MSP.h`) — no new MSP traffic, same plumbing as §5[C]. `MSPManager::sendFollowWaypoint()` **still takes `headingDeg` and still writes it to `p1`** — deliberately, even though it's inert today, because it costs nothing (same message, no extra MSP round trip) and means FF doesn't need a code change if a future INAV extends `POSHOLD_3D` to honor `p1` the way RTH/WAYPOINT/CRUISE already do. `FollowManager::loop()` additionally calls `MSPManager::sendSetHead()`, gated on `isHeadingHoldActive()` and on `resolveHeadingDeg()` not returning its own `0`/`FOLLOW_HEADING_MODE = OFF` sentinel — this second, gated send is what actually steers the aircraft today.
+
+**Operational implication, not just a firmware detail:** unlike `NAV POSHOLD`/`GCS NAV` (which FF's status endpoint already surfaces as a precondition), the HEADING HOLD box is the pilot's/operator's responsibility to wire to an AUX switch and enable on the follower before flight — FF cannot turn it on remotely. Any heading mode other than `OFF` is a silent no-op in the air until that's done. Worth surfacing in `statusJson()`/the web UI as a visible precondition, not just documented here (tracked, not yet implemented as of this correction).
 
 **`FOLLOW_HEADING_MODE` (config, §9), default `POINT_LEADER`:**
 

@@ -50,6 +50,9 @@ Two pre-build scripts run before every compile (wired in `[env] extra_scripts`):
   ships embedded in firmware, not as separate files on the device.
 - `scripts/build_flags.py` — injects dynamic build flags (git version/hash, etc.).
 
+### Building a minimal build for OTA updates from a different branch
+`PLATFORMIO_BUILD_FLAGS="-D MINIMAL_BUILD" pio run -e expresslrs_rx_2400_AntennaDiversity_via_WiFi`
+
 ### Runtime: singleton managers driven from one main loop
 
 `src/main.cpp` owns global state (`cfg`/`config_t`, `sys`/`system_t`, `curr`/`curr_t`, from

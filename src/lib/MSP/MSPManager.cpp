@@ -63,6 +63,18 @@ bool MSPManager::isGCSNavActive()
     return bitRead(getActiveModesCached(), MSP_MODE_GCSNAV);
 }
 
+// Returns whether INAV's HEADING HOLD ("MAG") box is active on the FC — see
+// sendSetHead()'s comment (MSPManager.h) for why this gates whether a
+// commanded heading actually reaches the yaw-rate PID while in NAV POSHOLD_3D.
+bool MSPManager::isHeadingHoldActive()
+{
+    if (!ready || !hostIsFlightController(this->getFCVariant()))
+    {
+        return false;
+    }
+    return bitRead(getActiveModesCached(), MSP_MODE_MAG);
+}
+
 // Requests the name of the flight controller over MSP without caching
 void MSPManager::getName(char *name, size_t length)
 {
@@ -321,6 +333,14 @@ void MSPManager::sendRadar(const peer_t *peer)
 // p1 doubles as heading for this special waypoint only (spec §7.7) - for
 // ordinary mission waypoints (1-60) it means cruise speed instead; the two
 // are not the same field just because they share a byte offset.
+// NOTE: as of INAV 9.x, the heading is currently inert for a follower in NAV
+// POSHOLD_3D — NAV_STATE_POSHOLD_3D_IN_PROGRESS lacks NAV_REQUIRE_MAGHOLD, so
+// INAV's yaw-rate PID never actually reads the desiredState.yaw this sets
+// (see sendSetHead()'s comment for the real, currently-working path and the
+// full firmware-source trail). Sent anyway rather than hardcoded to 0: it's
+// free (same message, no extra MSP traffic), and if INAV ever extends
+// POSHOLD_3D to honor it, FF already sends the right value with no code
+// change needed on our side.
 void MSPManager::sendFollowWaypoint(int32_t lat_1e7, int32_t lon_1e7, int32_t alt_cm, int16_t headingDeg)
 {
     msp_set_wp_t wp{};
@@ -332,6 +352,18 @@ void MSPManager::sendFollowWaypoint(int32_t lat_1e7, int32_t lon_1e7, int32_t al
     wp.p1 = headingDeg; wp.p2 = 0; wp.p3 = 0;
     wp.flag = 0;
     msp->command(MSP_SET_WP, &wp, sizeof(wp));
+}
+
+// MSP_SET_HEAD (#211) - explicit heading-hold target (spec §7.7 follow-up).
+// One-way, best-effort, no ACK wait, mirrors sendGvar()'s fire-and-forget
+// style. Callers must gate on isHeadingHoldActive() themselves — INAV
+// accepts this unconditionally but the yaw-rate PID only consumes the target
+// it writes when the HEADING HOLD box is active (see MSPManager.h).
+void MSPManager::sendSetHead(int16_t headingDeg)
+{
+    msp_set_head_t head{};
+    head.magHoldHeading = headingDeg;
+    msp->command(MSP_SET_HEAD, &head, sizeof(head));
 }
 
 void MSPManager::sendGvar(uint8_t index, int32_t value)

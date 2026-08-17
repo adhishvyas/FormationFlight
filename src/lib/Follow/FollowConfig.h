@@ -132,3 +132,25 @@ enum FollowHeadingMode {
 #ifndef FOLLOW_RC_VERT_CHANNEL
 #define FOLLOW_RC_VERT_CHANNEL -1
 #endif
+
+// Debug GVAR output: RAM-only toggle (FollowRuntimeConfig::debug in
+// FollowManager.h — deliberately absent from FollowEepromRecord, so it's
+// always off again after a reboot, never persisted). When on, the locked
+// target peer's lat/lon/alt/heading are written to these four fixed GVAR
+// indices every loop() cycle, for bench-testing in the goggles without
+// dedicating a status/condition GVAR slot to it. Off by default.
+#ifndef FOLLOW_DEBUG_ENABLED
+#define FOLLOW_DEBUG_ENABLED false
+#endif
+#ifndef FOLLOW_DEBUG_LAT_GVAR_INDEX
+#define FOLLOW_DEBUG_LAT_GVAR_INDEX 4
+#endif
+#ifndef FOLLOW_DEBUG_LON_GVAR_INDEX
+#define FOLLOW_DEBUG_LON_GVAR_INDEX 5
+#endif
+#ifndef FOLLOW_DEBUG_ALT_GVAR_INDEX
+#define FOLLOW_DEBUG_ALT_GVAR_INDEX 6
+#endif
+#ifndef FOLLOW_DEBUG_HEADING_GVAR_INDEX
+#define FOLLOW_DEBUG_HEADING_GVAR_INDEX 7
+#endif

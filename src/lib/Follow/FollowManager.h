@@ -80,6 +80,12 @@ struct FollowRuntimeConfig {
     int16_t rcLongChannel = FOLLOW_RC_LONG_CHANNEL;
     int16_t rcLatChannel = FOLLOW_RC_LAT_CHANNEL;
     int16_t rcVertChannel = FOLLOW_RC_VERT_CHANNEL;
+
+    // RAM only, deliberately absent from FollowEepromRecord below — always
+    // resets to false on reboot rather than persisting (see FollowConfig.h's
+    // FOLLOW_DEBUG_ENABLED comment). When true, the follower's own commanded
+    // waypoint lat/lon/alt/heading are written to GVARs 4-7 every loop() cycle.
+    bool debug = FOLLOW_DEBUG_ENABLED;
 };
 
 // EEPROM persistence (Phase 4B): FollowRuntimeConfig's on-disk mirror, kept
@@ -275,4 +281,8 @@ private:
     // altitude-floor clamp and RC-freeze conditions (spec §5.1/§5.2) before
     // calling this, so this function no longer derives it itself.
     void updateStatusGvars(FollowConditionCode conditionCode);
+    // Writes the follower's just-computed commanded waypoint (lat/lon/alt/
+    // heading — the same values passed to sendFollowWaypoint()) to GVARs 4-7
+    // (FOLLOW_DEBUG_*_GVAR_INDEX) every loop() cycle, gated on config.debug.
+    void updateDebugGvars(int32_t lat_1e7, int32_t lon_1e7, int32_t altCm, int16_t headingDeg);
 };

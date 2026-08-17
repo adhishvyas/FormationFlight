@@ -344,6 +344,9 @@ void handleFollowManagerConfigPost(AsyncWebServerRequest *request)
     if (request->hasParam("rcLatChannel", true)) cfg.rcLatChannel = (int16_t)strParam("rcLatChannel").toInt();
     if (request->hasParam("rcVertChannel", true)) cfg.rcVertChannel = (int16_t)strParam("rcVertChannel").toInt();
 
+    // RAM only (never persisted — see FollowRuntimeConfig::debug).
+    if (request->hasParam("debug", true)) cfg.debug = strParam("debug") == "true";
+
     String errMsg;
     if (!FollowManager::getSingleton()->applyConfig(cfg, &errMsg)) {
         request->send(400, "text/plain", errMsg);

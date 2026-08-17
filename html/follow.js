@@ -164,6 +164,8 @@ export default function FollowPanel() {
     body.append('rcLatChannel', config.rcLatChannel);
     body.append('rcVertChannel', config.rcVertChannel);
 
+    body.append('debug', config.debug);
+
     return fetch(ENDPOINT_PREFIX + '/followmanager/config', { method: 'POST', body })
       .then(r => r.ok
         ? r.json().then(r => { applyFetchedConfig(r); setSaveResult({ status: true, message: successMessage }); return true; })
@@ -300,6 +302,7 @@ export default function FollowPanel() {
       <${Setting} title="Status GVAR Index" tip="Which INAV Global Variable to write the follow lock-state code to (0=inactive, 1=searching, 2=locked, 3=holding, 4=id lost). Configure a matching Custom OSD element in INAV Configurator to display it." value=${config.statusGvarIndex} setfn=${mksetfn('statusGvarIndex')} type="select" options=${gvarIndexOptions} />
       <${Setting} title="Condition Flags GVAR Index" tip="Which INAV Global Variable to write a secondary condition code to. Currently the only condition is the altitude floor actively clamping the commanded altitude (0=no condition, 1=altitude floor clamped); more conditions may be added to this same slot in the future." value=${config.conditionFlagsGvarIndex} setfn=${mksetfn('conditionFlagsGvarIndex')} type="select" options=${gvarIndexOptions} />
       <div class="text-xs text-gray-500 mt-2">Requires INAV 9.0 or later on the follower FC. Values are written but ignored on older firmware.</div>
+      <${Setting} cls="grid grid-cols-2 gap-2 my-1 pt-3 mt-2 border-t" title="Debug (GVARs 4-7)" tip="Writes the locked target peer's raw lat, lon, alt, and heading to GVARs 4, 5, 6, and 7 every cycle, for bench-testing in the goggles. Session-only — always resets to Off on reboot, never saved to EEPROM." value=${config.debug} setfn=${mksetfn('debug')} type="switch" />
     <//>
   <//>
 

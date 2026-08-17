@@ -533,6 +533,8 @@ void FollowManager::loop()
     // branch (spec §7.7 explains why that's safe for fixed-wing too).
     int16_t headingDeg = resolveHeadingDeg(peer, courseDeg);
 
+    updateDebugGvars(target.lat_1e7, target.lon_1e7, altCm, headingDeg);
+
     MSPManager::getSingleton()->sendFollowWaypoint(target.lat_1e7, target.lon_1e7, altCm, headingDeg);
     updateStatusGvars(conditionCode);
 
@@ -647,6 +649,23 @@ void FollowManager::updateStatusGvars(FollowConditionCode conditionCode)
     }
 }
 
+// lat_1e7/lon_1e7 are the follower's commanded waypoint (x1e7 degrees, same
+// as FollowTarget), altCm is home-relative cm, headingDeg is whole degrees —
+// the exact values just passed to sendFollowWaypoint(), sent as-is since this
+// is a raw debug readout, not a value the OSD needs scaled for display.
+void FollowManager::updateDebugGvars(int32_t lat_1e7, int32_t lon_1e7, int32_t altCm, int16_t headingDeg)
+{
+    if (!config.debug)
+    {
+        return;
+    }
+    MSPManager *msp = MSPManager::getSingleton();
+    msp->sendGvar(FOLLOW_DEBUG_LAT_GVAR_INDEX, lat_1e7);
+    msp->sendGvar(FOLLOW_DEBUG_LON_GVAR_INDEX, lon_1e7);
+    msp->sendGvar(FOLLOW_DEBUG_ALT_GVAR_INDEX, altCm);
+    msp->sendGvar(FOLLOW_DEBUG_HEADING_GVAR_INDEX, headingDeg);
+}
+
 static const char *headingModeName(FollowHeadingMode m)
 {
     switch (m)
@@ -701,6 +720,11 @@ void FollowManager::configJson(JsonDocument *doc) const
     (*doc)["rcLongChannel"] = config.rcLongChannel;
     (*doc)["rcLatChannel"] = config.rcLatChannel;
     (*doc)["rcVertChannel"] = config.rcVertChannel;
+
+    // RAM only (spec: FollowConfig.h's FOLLOW_DEBUG_ENABLED comment) — not
+    // in FollowEepromRecord, so this always reports false again after a
+    // reboot regardless of what was last applied.
+    (*doc)["debug"] = config.debug;
 }
 
 bool FollowManager::applyConfig(const FollowRuntimeConfig &newConfig, String *errMsg)

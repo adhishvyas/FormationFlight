@@ -57,6 +57,7 @@ DEFAULT_CONFIG = {
     # something to show without needing to be configured first.
     "statusGvarIndex": 0, "conditionFlagsGvarIndex": 1,
     "rcLongChannel": -1, "rcLatChannel": -1, "rcVertChannel": -1,
+    "debug": False,
 }
 CONFIG = copy.deepcopy(DEFAULT_CONFIG)
 
@@ -221,6 +222,8 @@ class Handler(BaseHTTPRequestHandler):
                     new_cfg[f] = int(params[f])
             if "headingMode" in params:
                 new_cfg["headingMode"] = params["headingMode"]
+            if "debug" in params:
+                new_cfg["debug"] = params["debug"] == "true"
 
             err = validate_config(new_cfg)
             if err:

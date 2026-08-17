@@ -12,6 +12,8 @@
 #include <main.h>
 #include <lib/Helpers.h>
 #include <lib/ConfigHandler.h>
+#include <lib/WiFi/WiFiManager.h>
+#ifndef MINIMAL_BUILD
 // Power
 #include <lib/Power/PowerManager.h>
 // Internals
@@ -26,13 +28,13 @@
 #include <lib/GNSS/Direct_GNSS.h>
 #endif
 // Radios
-#include <lib/WiFi/WiFiManager.h>
 #include <lib/Radios/RadioManager.h>
 #include <lib/Radios/ESPNOW.h>
 #include <lib/Radios/LoRa_SX128X.h>
 #include <lib/Radios/LoRa_SX127X.h>
 // User interface
 #include <lib/Display/Display.h>
+#endif
 
 
 // -------- VARS
@@ -70,6 +72,26 @@ void IRAM_ATTR handleInterrupt()
 #endif
 }
 
+#ifdef MINIMAL_BUILD
+void setup()
+{
+#ifdef PLATFORM_ESP32
+    Serial.begin(921600);
+#endif
+    DBGLN("[main] start (minimal OTA build)");
+    DBGF("%s version %s UID %s\n", PRODUCT_NAME, VERSION, generate_id().c_str());
+
+    // Barest minimum needed to serve the WiFi AP + web OTA update page.
+    WiFiManager::getSingleton();
+
+    DBGLN("[main] init complete");
+}
+
+void loop()
+{
+    WiFiManager::getSingleton()->loop();
+}
+#else
 void setup()
 {
 
@@ -439,3 +461,4 @@ void loop()
     }
 
 }
+#endif // MINIMAL_BUILD

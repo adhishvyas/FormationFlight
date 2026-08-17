@@ -11,12 +11,14 @@
 #include <ArduinoOTA.h>
 // Config methods
 #include <ArduinoJson.h>
+#ifndef MINIMAL_BUILD
 #include "../Radios/RadioManager.h"
 #include "../Peers/PeerManager.h"
 #include "../GNSS/GNSSManager.h"
 #include "../Power/PowerManager.h"
 #include "../Statistics/StatsManager.h"
 #include "../Cryptography/CryptoManager.h"
+#endif
 #include "webcontent.h"
 
 WiFiManager::WiFiManager()
@@ -62,6 +64,7 @@ WiFiManager::WiFiManager()
         request->send(200, "text/plain", "OK");
         delayMicroseconds(1000);
     });
+#ifndef MINIMAL_BUILD
     // RadioManager
     server->on("/radiomanager/status", HTTP_GET, [](AsyncWebServerRequest *request) {
         StaticJsonDocument<512> doc;
@@ -149,6 +152,7 @@ WiFiManager::WiFiManager()
         serializeJson(doc, *response);
         request->send(response);
     });
+#endif // MINIMAL_BUILD
     // OTA firmware updates
     server->on("/update", HTTP_POST, handleFileUploadResponse, handleFileUploadData);
     // 404
@@ -239,11 +243,13 @@ void handleSystemStatus(AsyncWebServerRequest *request)
     doc["lora_band"] = LORA_BAND;
 #endif
     doc["uptimeMilliseconds"] = millis();
+    doc["longName"] = generate_id();
+#ifndef MINIMAL_BUILD
     doc["phase"] = sys.phase;
     doc["name"] = curr.name;
-    doc["longName"] = generate_id();
     doc["host"] = host_name[MSPManager::getSingleton()->getFCVariant()];
     doc["state"] = MSPManager::getSingleton()->getState();
+#endif
     AsyncResponseStream *response = request->beginResponseStream("application/json");
     serializeJson(doc, *response);
     request->send(response);

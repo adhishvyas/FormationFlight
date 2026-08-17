@@ -448,14 +448,14 @@ void FollowManager::loop()
         lockedId = 0;
         lockedName[0] = '\0';
         haveValidCourse = false;
-        updateStatusGvars(rcPreArmCheckFailed ? 2 : 0);
+        updateStatusGvars(rcPreArmCheckFailed ? FOLLOW_CONDITION_RC_INVALID_GAP_SETTINGS : FOLLOW_CONDITION_NONE);
         return;
     }
 
     const peer_t *peer = resolveLock();
     if (peer == nullptr)
     {
-        updateStatusGvars(0);
+        updateStatusGvars(FOLLOW_CONDITION_NONE);
         return; // ACQUIRING or LOCKED_HOLDING this cycle — nothing to emit
     }
 
@@ -508,14 +508,14 @@ void FollowManager::loop()
     // spec §5.3's condition-code table: code 2 whenever either mechanism is
     // active (they never disagree — see spec §5.2), otherwise code 1 if just
     // the floor clamped for a reason unrelated to RC, otherwise 0.
-    int32_t conditionCode = 0;
+    FollowConditionCode conditionCode = FOLLOW_CONDITION_NONE;
     if (floorClamped)
     {
-        conditionCode = floorAttributableToRc ? 2 : 1;
+        conditionCode = floorAttributableToRc ? FOLLOW_CONDITION_RC_INVALID_GAP_SETTINGS : FOLLOW_CONDITION_FLOOR_CLAMPED;
     }
     if (rcSlotFrozen)
     {
-        conditionCode = 2;
+        conditionCode = FOLLOW_CONDITION_RC_INVALID_GAP_SETTINGS;
     }
 
     if (!targetSane(offset, target))
@@ -609,7 +609,7 @@ static int32_t statusGvarValue(FollowLockState state, uint8_t lockedId)
     }
 }
 
-void FollowManager::updateStatusGvars(int32_t conditionCode)
+void FollowManager::updateStatusGvars(FollowConditionCode conditionCode)
 {
     MSPManager *msp = MSPManager::getSingleton();
     unsigned long now = millis();

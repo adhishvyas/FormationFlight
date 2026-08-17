@@ -12,6 +12,13 @@ enum FollowLockState {
     FOLLOW_LOCK_LOCKED_HOLDING = 3,
 };
 
+// spec §5.3's condition-code table, sent via conditionFlagsGvarIndex.
+enum FollowConditionCode {
+    FOLLOW_CONDITION_NONE = 0,          // neither mechanism active
+    FOLLOW_CONDITION_FLOOR_CLAMPED = 1, // altitude floor clamped, unrelated to RC
+    FOLLOW_CONDITION_RC_INVALID_GAP_SETTINGS = 2,     // RC-attributable invalid gap rettings, and/or rcSlotFrozen (spec §5.2: never disagree)
+};
+
 // Resolved 3D slot offset in the leader's track-relative frame, meters.
 // Kept as double (not float) since it's combined with GPS-derived doubles
 // and FC altitude centimeters in FollowManager.cpp's target math.
@@ -267,5 +274,5 @@ private:
     // spec §5.3 0/1/2 value for conditionFlagsGvarIndex — callers combine the
     // altitude-floor clamp and RC-freeze conditions (spec §5.1/§5.2) before
     // calling this, so this function no longer derives it itself.
-    void updateStatusGvars(int32_t conditionCode);
+    void updateStatusGvars(FollowConditionCode conditionCode);
 };

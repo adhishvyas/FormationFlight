@@ -264,9 +264,9 @@ private:
     // (spec §7.7). courseDeg is the already-computed resolveCourseDeg()
     // result, reused here instead of recomputed. Returns 0 for
     // FOLLOW_HEADING_OFF (the "don't touch heading" wire sentinel);
-    // otherwise wraps into [1, 360] — a computed value of exactly 0 is
-    // remapped to 360, since INAV's WP#255 handler treats p1 == 0 as "no
-    // heading update," not due north.
+    // otherwise wraps into [1, 359] — INAV's WP#255 handler only applies a
+    // heading update when 0 < p1 < 360 (both ends exclusive), so a computed
+    // value of exactly 0/360 is remapped to 1, not 360.
     int16_t resolveHeadingDeg(const peer_t *peer, double courseDeg) const;
     // Derives this cycle's GVAR values from current state and sends whichever
     // of the two configured GVARs (spec §3.4) changed or are due for their

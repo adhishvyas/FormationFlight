@@ -236,9 +236,13 @@ int16_t FollowManager::resolveHeadingDeg(const peer_t *peer, double courseDeg) c
     }
     if (deg == 0)
     {
-        // INAV's WP#255 handler requires p1 > 0 to apply a heading update —
-        // p1 == 0 means "leave heading alone," not "due north" (spec §7.7).
-        deg = 360;
+        // INAV's WP#255 handler only applies a heading update when
+        // 0 < p1 < 360 (both ends exclusive — navigation.c, setWaypoint()).
+        // p1 == 0 means "leave heading alone," and p1 == 360 is *also*
+        // rejected by the same check, so it can't be used as a stand-in for
+        // due north either. Nudge to 1° instead — imperceptible in flight,
+        // and inside the valid range.
+        deg = 1;
     }
     return (int16_t)deg;
 }

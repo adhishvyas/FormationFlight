@@ -266,7 +266,8 @@ zero MSP traffic is sent for a disabled slot.
 |---|---|
 | `0` | No condition active |
 | `1` | Altitude floor is actively clamping the commanded altitude |
-| `2` | RC-driven slot is frozen at its last safe position, or the pre-arm RC check failed (§7) |
+| `2` | Target too far from this craft — Follow paused rather than chasing across an unbounded distance (see Max Target Distance, §4) |
+| `3` | RC-driven slot is frozen at its last safe position, or the pre-arm RC check failed (§7) |
 
 ### 6.2 One-time INAV CLI setup
 
@@ -280,31 +281,38 @@ logic 0 1 -1 1 5 <STATUS_GVAR_INDEX> 0 1 0
 logic 1 1 -1 1 5 <STATUS_GVAR_INDEX> 0 2 0
 logic 2 1 -1 1 5 <STATUS_GVAR_INDEX> 0 3 0
 logic 3 1 -1 1 5 <STATUS_GVAR_INDEX> 0 4 0
+logic 4 1 -1 1 5 <CONDITION_FLAGS_GVAR_INDEX> 0 1 0
+logic 5 1 -1 1 5 <CONDITION_FLAGS_GVAR_INDEX> 0 2 0
+logic 6 1 -1 1 5 <CONDITION_FLAGS_GVAR_INDEX> 0 3 0
 osd_custom_elements 0 1 0 0 0 0 0 2 0 "SEARCHING"
 osd_custom_elements 1 1 0 0 0 0 0 2 1 "LOCKED"
 osd_custom_elements 2 1 0 0 0 0 0 2 2 "HOLD LOST"
 osd_custom_elements 3 1 0 0 0 0 0 2 3 "ID LOST"
-osd_custom_elements 4 1 0 0 0 0 0 1 <CONDITION_FLAGS_GVAR_INDEX> "ALT FLOOR"
+osd_custom_elements 4 1 0 0 0 0 0 2 4 "ALT FLOOR"
+osd_custom_elements 5 1 0 0 0 0 0 2 5 "TOO FAR"
+osd_custom_elements 6 1 0 0 0 0 0 2 6 "BAD RC"
 save
 ```
 
+*(the exact `logic`/`osd_custom_elements` parameter values above haven't been
+bench-verified against a real INAV CLI session yet — verify before relying on
+them; see §6.4.)*
+
 What this does:
 
-- The four `logic` lines each define a Logic Condition that evaluates "does
-  the Status GVAR currently equal this code" (`1`–`4`).
-- The first four `osd_custom_elements` lines each define a fixed piece of OSD
+- The seven `logic` lines each define a Logic Condition that evaluates "does
+  the Status GVAR (first four) or Condition Flags GVAR (last three) currently
+  equal this code."
+- The seven `osd_custom_elements` lines each define a fixed piece of OSD
   text, visible only when its matching Logic Condition is true. Text is
   capped at 16 characters and INAV auto-uppercases it regardless of how you
   type it here — edit the quoted strings to whatever wording you prefer.
-- The fifth `osd_custom_elements` line is simpler: rather than a Logic
-  Condition, it's gated directly on the Condition Flags GVAR being nonzero
-  (visibility type `1`), since that GVAR is already a plain "is this
-  condition active" flag.
-- Code `0` (gate inactive) deliberately has no matching element — the OSD
-  stays clean on flights where you never engage Follow Mode.
+- Code `0` (gate inactive) and Condition Flags code `0` (no condition active)
+  deliberately have no matching element — the OSD stays clean on flights
+  where you never engage Follow Mode or no condition is active.
 
-This example uses Logic Condition slots `0`–`3` and Custom OSD Element slots
-`0`–`4`. If any of those are already used by something else on your aircraft
+This example uses Logic Condition slots `0`–`6` and Custom OSD Element slots
+`0`–`6`. If any of those are already used by something else on your aircraft
 (another Logic Condition setup, existing custom elements), use free slots
 instead and adjust the `osd_custom_elements` visibility values to match.
 
@@ -312,7 +320,7 @@ instead and adjust the `osd_custom_elements` visibility values to match.
 
 `osd_custom_elements` only *defines* the elements — it doesn't position them.
 In Configurator's **OSD** tab, the elements you just created appear in the
-item list as `CUSTOM ELEMENT 1`–`5`; drag each onto the OSD preview wherever
+item list as `CUSTOM ELEMENT 1`–`7`; drag each onto the OSD preview wherever
 you want it to appear on screen.
 
 ### 6.4 Verify
@@ -398,7 +406,7 @@ direction — until you either move that stick back to a safe combination, or
 widen one of the other RC-assigned axes past Min Separation first (the same
 way a real formation pass has to route *around* another aircraft, not through
 it). The Follow panel shows an inline warning (and, if you've set up the
-Condition Flags GVAR, `2` on your OSD) whenever this freeze is active.
+Condition Flags GVAR, `3` on your OSD) whenever this freeze is active.
 
 ### 7.4 Pre-arm check
 

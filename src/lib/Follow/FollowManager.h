@@ -12,11 +12,21 @@ enum FollowLockState {
     FOLLOW_LOCK_LOCKED_HOLDING = 3,
 };
 
-// spec §5.3's condition-code table, sent via conditionFlagsGvarIndex.
+// spec docs/spec/2026-08-13-FollowStatusOsdGvar.md §3.2's condition-code
+// table, sent via conditionFlagsGvarIndex. Sequential, not a bitmask — only
+// one code is ever reported at a time. Values are ordered low-to-high by
+// pilot-relevant priority (see raiseCondition() in FollowManager.cpp's
+// loop()): when multiple conditions are true in the same cycle, the
+// highest-valued one wins. Prefer appending future conditions above
+// FOLLOW_CONDITION_RC_INVALID_GAP_SETTINGS in priority order rather than
+// renumbering an existing value — once this ships, a renumber would break
+// any pilot's INAV Logic Condition already wired against the old number,
+// so only insert mid-range when priority genuinely demands it.
 enum FollowConditionCode {
-    FOLLOW_CONDITION_NONE = 0,          // neither mechanism active
-    FOLLOW_CONDITION_FLOOR_CLAMPED = 1, // altitude floor clamped, unrelated to RC
-    FOLLOW_CONDITION_RC_INVALID_GAP_SETTINGS = 2,     // RC-attributable invalid gap rettings, and/or rcSlotFrozen (spec §5.2: never disagree)
+    FOLLOW_CONDITION_NONE = 0,                    // no condition active
+    FOLLOW_CONDITION_FLOOR_CLAMPED = 1,            // altitude floor clamped, unrelated to RC
+    FOLLOW_CONDITION_TARGET_TOO_FAR = 2,           // solved target beyond maxTargetDistM; waypoint suppressed
+    FOLLOW_CONDITION_RC_INVALID_GAP_SETTINGS = 3,  // RC-attributable invalid gap settings, and/or rcSlotFrozen
 };
 
 // Resolved 3D slot offset in the leader's track-relative frame, meters.
@@ -193,7 +203,8 @@ private:
     unsigned long nextRunTime = 0;
 
     // Last target actually emitted via sendFollowWaypoint() (i.e. it passed
-    // targetSane()), for status reporting only — not used by the control loop.
+    // offsetGeometrySane()/targetTooFar()), for status reporting only — not
+    // used by the control loop.
     bool haveLastTarget = false;
     FollowTarget lastTarget{};
     int32_t lastTargetAltCm = 0;
@@ -232,7 +243,7 @@ private:
     bool havePreArmCandidateOffset = false;
     // Offset triple actually used for the last emitted waypoint (spec §7
     // liveOffset), distinct from lastKnownGood which persists even on a
-    // targetSane() rejection where no waypoint went out.
+    // geometry-sane/targetTooFar() rejection where no waypoint went out.
     FollowOffset lastLiveOffset{};
 
     bool followSwitchActive();
@@ -266,7 +277,11 @@ private:
     // Leader's usable track course in plain degrees, applying the
     // low-speed/stationary fallback (spec §7.5).
     double resolveCourseDeg(const peer_t *peer);
-    bool targetSane(const FollowOffset &offset, const FollowTarget &target);
+    // Runtime sanity: is the solved target farther than config.maxTargetDistM
+    // from the follower's own position (spec §7.4)? Geometry sanity
+    // (offsetGeometrySane()) is checked separately by the caller so it can
+    // attribute a failure here specifically to FOLLOW_CONDITION_TARGET_TOO_FAR.
+    bool targetTooFar(const FollowTarget &target) const;
     // Commanded nose heading for this cycle, resolved per config.headingMode
     // (spec §7.7). courseDeg is the already-computed resolveCourseDeg()
     // result, reused here instead of recomputed. Returns 0 for
@@ -282,8 +297,8 @@ private:
     // Derives this cycle's GVAR values from current state and sends whichever
     // of the two configured GVARs (spec §3.4) changed or are due for their
     // heartbeat resend (spec §3.3). conditionCode is the caller-computed
-    // spec §5.3 0/1/2 value for conditionFlagsGvarIndex — callers combine the
-    // altitude-floor clamp and RC-freeze conditions (spec §5.1/§5.2) before
+    // spec §5.3 0-3 value for conditionFlagsGvarIndex — callers combine the
+    // altitude-floor clamp, target-too-far, and RC-freeze conditions before
     // calling this, so this function no longer derives it itself.
     void updateStatusGvars(FollowConditionCode conditionCode);
     // Writes the follower's just-computed commanded waypoint (lat/lon/alt/

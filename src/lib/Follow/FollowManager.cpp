@@ -256,12 +256,12 @@ int16_t FollowManager::resolveHeadingDeg(const peer_t *peer, double courseDeg) c
     return (int16_t)deg;
 }
 
-// Shared by targetSane() (runtime, has a live peer) and applyConfig()
-// (server-side §7.4 validation of a candidate config with no peer in
-// scope yet) so both always agree on the same two geometry rules. Only the
-// two checks that depend purely on the configured offset — not on a live
-// peer/target — live here; targetSane()'s max-distance-from-self check has
-// no equivalent at config-validation time and stays in targetSane() below.
+// Shared by loop() (runtime, has a live peer) and applyConfig() (server-side
+// §7.4 validation of a candidate config with no peer in scope yet) so both
+// always agree on the same two geometry rules. Only the two checks that
+// depend purely on the configured offset — not on a live peer/target — live
+// here; targetTooFar()'s max-distance-from-self check has no equivalent at
+// config-validation time and stays in targetTooFar() below.
 static bool offsetGeometrySane(const FollowOffset &offset, double minSepM, double minVSepM, String *errMsg)
 {
     double horizontalMag = sqrt(offset.longitudinal_m * offset.longitudinal_m +
@@ -429,25 +429,13 @@ FollowOffset FollowManager::resolveOffset()
     return lastKnownGood;
 }
 
-bool FollowManager::targetSane(const FollowOffset &offset, const FollowTarget &target)
+bool FollowManager::targetTooFar(const FollowTarget &target) const
 {
-    if (!offsetGeometrySane(offset, config.minSepM, config.minVSepM, nullptr))
-    {
-        return false;
-    }
-
-    // Runtime sanity: the solved target shouldn't be unreasonably far from
-    // the follower's own position (spec §7.4).
     GNSSLocation targetLoc{};
     targetLoc.lat = (double)target.lat_1e7 / 1e7;
     targetLoc.lon = (double)target.lon_1e7 / 1e7;
     double distFromSelf = GNSSManager::getSingleton()->horizontalDistanceTo(targetLoc);
-    if (distFromSelf > config.maxTargetDistM)
-    {
-        return false;
-    }
-
-    return true;
+    return distFromSelf > config.maxTargetDistM;
 }
 
 void FollowManager::loop()
@@ -528,7 +516,7 @@ void FollowManager::loop()
     // configurable minimum home-relative altitude, regardless of what the
     // sum above produced — e.g. the leader flying low/landing, or a BELOW
     // slot dragging the follower toward the ground. Clamp, don't reject:
-    // unlike targetSane() below, this must not suppress the waypoint —
+    // unlike the geometry-sane/targetTooFar() checks below, this must not suppress the waypoint —
     // the follower should keep tracking laterally and hold at the floor.
     int32_t floorCm = (int32_t)lround(config.minAltM * 100.0);
     bool floorClamped = altCm < floorCm;
@@ -553,21 +541,32 @@ void FollowManager::loop()
         floorAttributableToRc = altCmStatic >= floorCm;
     }
 
-    // spec §5.3's condition-code table: code 2 whenever either mechanism is
-    // active (they never disagree — see spec §5.2), otherwise code 1 if just
-    // the floor clamped for a reason unrelated to RC, otherwise 0.
+    // spec §3.2: sequential, single-value condition code — raise to whichever
+    // active condition ranks highest this cycle rather than overwriting in
+    // call order (see this file's FollowConditionCode comment).
     FollowConditionCode conditionCode = FOLLOW_CONDITION_NONE;
+    auto raiseCondition = [&conditionCode](FollowConditionCode candidate) {
+        if (candidate > conditionCode) conditionCode = candidate;
+    };
+
     if (floorClamped)
     {
-        conditionCode = floorAttributableToRc ? FOLLOW_CONDITION_RC_INVALID_GAP_SETTINGS : FOLLOW_CONDITION_FLOOR_CLAMPED;
+        raiseCondition(floorAttributableToRc ? FOLLOW_CONDITION_RC_INVALID_GAP_SETTINGS : FOLLOW_CONDITION_FLOOR_CLAMPED);
     }
     if (rcSlotFrozen)
     {
-        conditionCode = FOLLOW_CONDITION_RC_INVALID_GAP_SETTINGS;
+        raiseCondition(FOLLOW_CONDITION_RC_INVALID_GAP_SETTINGS);
     }
 
-    if (!targetSane(offset, target))
+    if (!offsetGeometrySane(offset, config.minSepM, config.minVSepM, nullptr))
     {
+        updateStatusGvars(conditionCode);
+        return;
+    }
+
+    if (targetTooFar(target))
+    {
+        raiseCondition(FOLLOW_CONDITION_TARGET_TOO_FAR);
         updateStatusGvars(conditionCode);
         return;
     }
@@ -697,7 +696,7 @@ void FollowManager::updateStatusGvars(FollowConditionCode conditionCode)
 
     if (config.conditionFlagsGvarIndex >= 0)
     {
-        int32_t value = conditionCode; // spec §5.3's 0/1/2 table, computed by callers now
+        int32_t value = conditionCode; // spec §5.3's 0-3 table, computed by callers now
         bool due = lastSentConditionFlagsGvarValue == INT32_MIN
                  || value != lastSentConditionFlagsGvarValue
                  || (now - lastConditionFlagsGvarSendMs) >= FOLLOW_GVAR_HEARTBEAT_MS;
@@ -850,9 +849,8 @@ bool FollowManager::applyConfig(const FollowRuntimeConfig &newConfig, String *er
     }
 
     // Spec §7.4 geometry rules, evaluated against the config's canonical
-    // offset — mirrors targetSane()'s two config-only checks so a config
-    // that's accepted here can never be rejected by targetSane() for the
-    // same reason later.
+    // offset — mirrors loop()'s offsetGeometrySane() call so a config that's
+    // accepted here can never be rejected by that same check later.
     FollowOffset offset = { newConfig.ofsLongM, newConfig.ofsLatM, newConfig.ofsVertM };
     if (!offsetGeometrySane(offset, newConfig.minSepM, newConfig.minVSepM, errMsg))
     {

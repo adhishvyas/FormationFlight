@@ -6,7 +6,8 @@ autonomous **Follow Mode** — where one aircraft (the "follower") automatically
 flies a formation slot behind/beside/above another aircraft (the "leader").
 
 Everything here is done from FF's web UI (the **Follow** panel, reachable by
-joining the aircraft's WiFi AP and browsing to `192.168.4.1`) and INAV
+joining the aircraft's WiFi AP — SSID `iNav Radar-<chip ID>`, password
+`inavradar` — and browsing to **`http://192.168.4.1/`**) and INAV
 Configurator. You don't need to read any spec or source code to follow this
 guide.
 
@@ -29,6 +30,8 @@ support isn't implemented.
 6. [Showing Follow status on your OSD (GVARs)](#6-showing-follow-status-on-your-osd-gvars)
 7. [Trimming the slot live with RC channels](#7-trimming-the-slot-live-with-rc-channels)
 8. [Troubleshooting](#8-troubleshooting)
+9. [Slot geometry diagram](#9-slot-geometry-diagram)
+10. [REST API reference: `/followmanager/config` and `/followmanager/status`](#10-rest-api-reference-followmanagerconfig-and-followmanagerstatus)
 
 ---
 
@@ -83,7 +86,8 @@ on and off in flight (§5).
 
 ## 3. The Follow panel, field by field
 
-Open the **Follow** panel in FF's web UI. It's organized into the sections
+Open the **Follow** panel in FF's web UI at **`http://192.168.4.1/`** (see
+§1 for how to join the aircraft's WiFi AP). It's organized into the sections
 below.
 
 ### Status
@@ -506,3 +510,126 @@ becomes an absolute lat/lon), see
 [`docs/explainers/follow-target-geometry.md`](explainers/follow-target-geometry.md)
 — that's implementation detail aimed at developers, not required reading to
 fly this feature.
+
+---
+
+## 10. REST API reference: `/followmanager/config` and `/followmanager/status`
+
+<a name="10-rest-api-reference-followmanagerconfig-and-followmanagerstatus"></a>
+
+Everything in the Follow panel is just a UI over two JSON endpoints served by
+the aircraft at `http://192.168.4.1/` (§1). This section is for anyone who
+wants to script config changes or poll status directly (e.g. `curl`, a
+ground-station script) instead of using the web UI — not required reading to
+fly Follow Mode.
+
+### `GET /followmanager/config`
+
+Returns the currently-applied Follow configuration (whatever was last set via
+**Apply**/**Save to EEPROM**, or the compiled-in defaults if nothing's been
+applied yet). The same shape is accepted back on `POST /followmanager/config`
+to change settings.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `ofsLongM` | number | Longitudinal offset, meters (+ahead / −behind) — §3's Follow Slot |
+| `ofsLatM` | number | Lateral offset, meters (+right / −left) |
+| `ofsVertM` | number | Vertical offset, meters (+above / −below) |
+| `triggerMode` | string | `"GCSNAV"` or `"AUX"` — read-only, see §3 Trigger & Target |
+| `targetPeer` | number | Pinned peer ID, or `0` for "First Active" |
+| `emitHz` | number | Target-position send rate, times/sec |
+| `peerTimeoutMs` | number | Leader-telemetry staleness timeout, ms |
+| `minSepM` | number | Minimum allowed 3D separation from the leader, meters |
+| `minVSepM` | number | Minimum vertical separation when the slot is stacked (no horizontal offset), meters |
+| `maxTargetDistM` | number | Reject/pause the target if farther than this from the leader, meters |
+| `minAltM` | number | Altitude floor (home-relative), meters |
+| `minCourseSpeed` | number | Below this leader ground speed (m/s), freeze slot orientation at the last trusted heading |
+| `headingMode` | string | One of `"OFF"`, `"COURSE"`, `"POINT_LEADER"`, `"FIXED"`, `"COURSE_RELATIVE"` — §3 Heading |
+| `headingDeg` | number | Degrees; meaning depends on `headingMode` (absolute heading for `FIXED`, offset for `COURSE_RELATIVE`) |
+| `statusGvarIndex` | number | GVAR index (`0`–`7`) for the primary status code, or `-1` if disabled |
+| `conditionFlagsGvarIndex` | number | GVAR index (`0`–`7`) for the condition-flags code, or `-1` if disabled |
+| `rcLongChannel` | number | 1-based RC channel driving the longitudinal axis, or `-1` if disabled — §7 |
+| `rcLatChannel` | number | 1-based RC channel driving the lateral axis, or `-1` if disabled |
+| `rcVertChannel` | number | 1-based RC channel driving the vertical axis, or `-1` if disabled |
+| `debug` | boolean | RAM-only debug-GVAR toggle; always reports `false` after a reboot, never persisted |
+
+Example:
+
+```json
+{
+  "ofsLongM": -15,
+  "ofsLatM": 0,
+  "ofsVertM": 10,
+  "triggerMode": "GCSNAV",
+  "targetPeer": 0,
+  "emitHz": 4,
+  "peerTimeoutMs": 1500,
+  "minSepM": 8,
+  "minVSepM": 13,
+  "maxTargetDistM": 50,
+  "minAltM": 3,
+  "minCourseSpeed": 2,
+  "headingMode": "POINT_LEADER",
+  "headingDeg": 0,
+  "statusGvarIndex": -1,
+  "conditionFlagsGvarIndex": -1,
+  "rcLongChannel": -1,
+  "rcLatChannel": -1,
+  "rcVertChannel": -1,
+  "debug": false
+}
+```
+
+### `GET /followmanager/status`
+
+Live, read-only snapshot — the same data backing §3's Status panel. Several
+fields are only present when they're meaningful (e.g. `lastTarget` is omitted
+until a target has actually been sent at least once).
+
+| Field | Type | Meaning |
+|---|---|---|
+| `state` | string | `"IDLE"`, `"ACQUIRING"`, `"LOCKED"`, or `"LOCKED_HOLDING"` — §3 lock states |
+| `gateActive` | boolean | Whether the follow gate (`GCS NAV`, §2.1) is currently active |
+| `lockedId` | number | Currently-locked peer ID (`0` if none) |
+| `lockedName` | string | Currently-locked peer's craft name |
+| `lastTarget` | object *(present once a target has been sent)* | Last commanded waypoint — see below |
+| `lastTarget.lat` | number | Latitude, degrees × 1e7 |
+| `lastTarget.lon` | number | Longitude, degrees × 1e7 |
+| `lastTarget.altCm` | number | Commanded altitude, home-relative centimeters |
+| `lastTarget.headingDeg` | number | Commanded nose heading sent alongside the target, degrees |
+| `lastTarget.ageMs` | number | Milliseconds since that target was sent |
+| `statusGvarValue` | number *(present once sent, if `statusGvarIndex >= 0`)* | Last status code written to the OSD GVAR — §6.1's table |
+| `conditionFlagsGvarValue` | number *(present once sent, if `conditionFlagsGvarIndex >= 0`)* | Last condition-flags code written to the OSD GVAR — §6.1's table |
+| `liveOffset` | object *(present once a target has been sent)* | The actual offset in effect this cycle, after RC trim (§7) is applied |
+| `liveOffset.longM` | number | Live longitudinal offset, meters |
+| `liveOffset.latM` | number | Live lateral offset, meters |
+| `liveOffset.vertM` | number | Live vertical offset, meters |
+| `rcSlotFrozen` | boolean *(present once a target has been sent)* | Whether the RC-trimmed slot is currently frozen for safety — §7.3 |
+| `preArmCandidateOffset` | object *(present only while disarmed and a candidate has been computed)* | What the slot would be right now if Follow Mode engaged — feeds the §7.4 pre-arm check |
+| `preArmCandidateOffset.longM` / `.latM` / `.vertM` | number | Candidate offset components, meters |
+| `rcPreArmCheckFailed` | boolean | Whether the §7.4 pre-arm advisory check currently fails |
+
+Example (locked, mid-flight, RC axis control enabled):
+
+```json
+{
+  "state": "LOCKED",
+  "gateActive": true,
+  "lockedId": 3,
+  "lockedName": "Leader-1",
+  "lastTarget": {
+    "lat": 473567890,
+    "lon": 85411234,
+    "altCm": 4500,
+    "headingDeg": 270,
+    "ageMs": 120
+  },
+  "liveOffset": {
+    "longM": -15,
+    "latM": 2.5,
+    "vertM": 10
+  },
+  "rcSlotFrozen": false,
+  "rcPreArmCheckFailed": false
+}
+```

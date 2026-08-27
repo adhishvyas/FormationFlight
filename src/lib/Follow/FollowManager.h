@@ -94,7 +94,7 @@ struct FollowRuntimeConfig {
     // RAM only, deliberately absent from FollowEepromRecord below — always
     // resets to false on reboot rather than persisting (see FollowConfig.h's
     // FOLLOW_DEBUG_ENABLED comment). When true, the follower's own commanded
-    // waypoint lat/lon/alt/heading are written to GVARs 4-7 every loop() cycle.
+    // waypoint lat/lon/alt/heading are written to GVARs 0-3 every loop() cycle.
     bool debug = FOLLOW_DEBUG_ENABLED;
 };
 
@@ -302,7 +302,7 @@ private:
     // calling this, so this function no longer derives it itself.
     void updateStatusGvars(FollowConditionCode conditionCode);
     // Writes the follower's just-computed commanded waypoint (lat/lon/alt/
-    // heading — the same values passed to sendFollowWaypoint()) to GVARs 4-7
+    // heading — the same values passed to sendFollowWaypoint()) to GVARs 0-3
     // (FOLLOW_DEBUG_*_GVAR_INDEX) every loop() cycle, gated on config.debug.
     void updateDebugGvars(int32_t lat_1e7, int32_t lon_1e7, int32_t altCm, int16_t headingDeg);
 };

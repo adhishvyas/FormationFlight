@@ -55,7 +55,7 @@ DEFAULT_CONFIG = {
     "headingMode": "POINT_LEADER", "headingDeg": 0.0,
     # Pre-populated (rather than -1/disabled) so the OSD Status panel has
     # something to show without needing to be configured first.
-    "statusGvarIndex": 0, "conditionFlagsGvarIndex": 1,
+    "statusGvarIndex": 6, "conditionFlagsGvarIndex": 7,
     "rcLongChannel": -1, "rcLatChannel": -1, "rcVertChannel": -1,
     "debug": False,
 }

@@ -710,18 +710,31 @@ void FollowManager::updateStatusGvars(FollowConditionCode conditionCode)
 }
 
 // lat_1e7/lon_1e7 are the follower's commanded waypoint (x1e7 degrees, same
-// as FollowTarget), altCm is home-relative cm, headingDeg is whole degrees —
-// the exact values just passed to sendFollowWaypoint(), sent as-is since this
-// is a raw debug readout, not a value the OSD needs scaled for display.
+// as FollowTarget) — too many digits for any INAV Custom OSD Element's
+// numeric display (widest built-in type clamps to ±99999) and not something
+// a pilot could sanity-check by eye anyway, so this converts them to the
+// target's offset from the follower's own current position (north/east, cm)
+// before sending — small enough to display, and directly meaningful ("target
+// is ~15m ahead"). altCm is home-relative cm, headingDeg is whole degrees —
+// both sent as-is, same as passed to sendFollowWaypoint().
 void FollowManager::updateDebugGvars(int32_t lat_1e7, int32_t lon_1e7, int32_t altCm, int16_t headingDeg)
 {
     if (!config.debug)
     {
         return;
     }
+    GNSSLocation targetLoc{};
+    targetLoc.lat = (double)lat_1e7 / 1e7;
+    targetLoc.lon = (double)lon_1e7 / 1e7;
+    GNSSManager *gnss = GNSSManager::getSingleton();
+    double distM = gnss->horizontalDistanceTo(targetLoc);
+    double bearingRad = radians((double)gnss->courseTo(targetLoc));
+    int32_t northOffsetCm = (int32_t)lround(distM * cos(bearingRad) * 100.0);
+    int32_t eastOffsetCm = (int32_t)lround(distM * sin(bearingRad) * 100.0);
+
     MSPManager *msp = MSPManager::getSingleton();
-    msp->sendGvar(FOLLOW_DEBUG_LAT_GVAR_INDEX, lat_1e7);
-    msp->sendGvar(FOLLOW_DEBUG_LON_GVAR_INDEX, lon_1e7);
+    msp->sendGvar(FOLLOW_DEBUG_NORTH_GVAR_INDEX, northOffsetCm);
+    msp->sendGvar(FOLLOW_DEBUG_EAST_GVAR_INDEX, eastOffsetCm);
     msp->sendGvar(FOLLOW_DEBUG_ALT_GVAR_INDEX, altCm);
     msp->sendGvar(FOLLOW_DEBUG_HEADING_GVAR_INDEX, headingDeg);
 }

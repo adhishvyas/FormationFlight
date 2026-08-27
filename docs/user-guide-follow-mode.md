@@ -344,6 +344,44 @@ time; with the gate off, none should be.
 - *[FPV goggles — OSD showing "ID LOST"]*
 - *[FPV goggles — OSD showing "ALT FLOOR" (or the RC-frozen condition) alongside a primary state]*
 
+### 6.5 Raw coordinate debug GVARs
+
+Separate from the status codes above, the Follow panel's **`debug`** toggle
+writes the commanded target's position and heading into four fixed GVAR
+slots every loop, for bench-testing in the goggles. It's a RAM-only toggle —
+always back off after a reboot, never persisted.
+
+| GVAR index | Value |
+|---|---|
+| `0` | North offset from the follower's own position, in **cm** (positive = target is north of you) |
+| `1` | East offset from the follower's own position, in **cm** (positive = target is east of you) |
+| `2` | Commanded altitude, home-relative, in **cm** |
+| `3` | Commanded heading, absolute compass degrees (`0`–`359`) |
+
+Indices `0`/`1` are a north/east offset from the follower's own position, not
+absolute lat/lon — INAV's Custom OSD Elements can't display absolute lat/lon
+anyway (raw GPS degrees × 1e7 is a ~9-10 digit number, but the widest
+built-in numeric OSD part type clamps its display to 5 digits/`±99999`,
+independent of the GVAR's own read/write range). A north/east offset in cm
+is both small enough to fit that display and directly meaningful at a
+glance — e.g. a "Behind 15 m" slot should read back as roughly `-1500` on
+whichever of North/East corresponds to the leader's direction of travel.
+
+**INAV clamps every GVAR write to that slot's configured range, and the
+default range is `-32768..32767`** — fine for indices `2`/`3` and usually
+fine for `0`/`1` too (a follow slot's gap is rarely more than a few hundred
+meters), but if you're bench-testing with an unusually large offset and see
+it pinned at exactly `32767`/`-32768`, widen that slot's range:
+
+```
+gvar 0 0 -2000000000 2000000000
+gvar 1 0 -2000000000 2000000000
+save
+```
+
+(`gvar` takes four arguments — `index default min max`, not three — the
+`default` here is `0`, INAV's own default for an unconfigured GVAR.)
+
 ---
 
 ## 7. Trimming the slot live with RC channels

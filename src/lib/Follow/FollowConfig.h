@@ -135,18 +135,22 @@ enum FollowHeadingMode {
 
 // Debug GVAR output: RAM-only toggle (FollowRuntimeConfig::debug in
 // FollowManager.h — deliberately absent from FollowEepromRecord, so it's
-// always off again after a reboot, never persisted). When on, the locked
-// target peer's lat/lon/alt/heading are written to these four fixed GVAR
-// indices every loop() cycle, for bench-testing in the goggles without
-// dedicating a status/condition GVAR slot to it. Off by default.
+// always off again after a reboot, never persisted). When on, the commanded
+// target's position relative to the follower's own current location (not
+// absolute lat/lon — those are ~9-10 digit numbers that don't fit any INAV
+// Custom OSD Element's numeric display, which tops out at 5 digits/±99999;
+// see docs/user-guide-follow-mode.md §6.5) plus alt/heading are written to
+// these four fixed GVAR indices every loop() cycle, for bench-testing in the
+// goggles without dedicating a status/condition GVAR slot to it. Off by
+// default.
 #ifndef FOLLOW_DEBUG_ENABLED
 #define FOLLOW_DEBUG_ENABLED false
 #endif
-#ifndef FOLLOW_DEBUG_LAT_GVAR_INDEX
-#define FOLLOW_DEBUG_LAT_GVAR_INDEX 0
+#ifndef FOLLOW_DEBUG_NORTH_GVAR_INDEX
+#define FOLLOW_DEBUG_NORTH_GVAR_INDEX 0
 #endif
-#ifndef FOLLOW_DEBUG_LON_GVAR_INDEX
-#define FOLLOW_DEBUG_LON_GVAR_INDEX 1
+#ifndef FOLLOW_DEBUG_EAST_GVAR_INDEX
+#define FOLLOW_DEBUG_EAST_GVAR_INDEX 1
 #endif
 #ifndef FOLLOW_DEBUG_ALT_GVAR_INDEX
 #define FOLLOW_DEBUG_ALT_GVAR_INDEX 2

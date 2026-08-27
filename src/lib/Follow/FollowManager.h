@@ -301,8 +301,10 @@ private:
     // altitude-floor clamp, target-too-far, and RC-freeze conditions before
     // calling this, so this function no longer derives it itself.
     void updateStatusGvars(FollowConditionCode conditionCode);
-    // Writes the follower's just-computed commanded waypoint (lat/lon/alt/
-    // heading — the same values passed to sendFollowWaypoint()) to GVARs 0-3
-    // (FOLLOW_DEBUG_*_GVAR_INDEX) every loop() cycle, gated on config.debug.
+    // Writes the follower's just-computed commanded waypoint (lat/lon
+    // converted to a north/east offset in cm from the follower's own
+    // position, plus alt/heading as passed to sendFollowWaypoint()) to
+    // GVARs 0-3 (FOLLOW_DEBUG_*_GVAR_INDEX) every loop() cycle, gated on
+    // config.debug.
     void updateDebugGvars(int32_t lat_1e7, int32_t lon_1e7, int32_t altCm, int16_t headingDeg);
 };

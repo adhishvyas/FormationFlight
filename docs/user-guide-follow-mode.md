@@ -229,6 +229,57 @@ entire time.
 **Screenshot placeholder:** *[FPV goggles — normal formation flight, follower
 tracking the leader at the configured slot]*
 
+### Testing Follow Mode with only one aircraft
+
+Don't have a second aircraft to fly as the leader? FF can generate a **fake,
+software-only leader** in its peer table instead of waiting for real
+telemetry from a second aircraft — enough to bench-test your slot geometry,
+heading mode, and RC trim on the ground, props off, before you ever need a
+real formation partner.
+
+This is done from a terminal with `curl` (or any HTTP client), not from the
+Follow panel — join the aircraft's WiFi the same way you would to open the
+panel (§1), then:
+
+```bash
+# Turn on a single fake leader flying a repeating hexagon patrol, centered on
+# wherever your own aircraft's GPS currently reports itself to be
+curl -d "index=1&sideLength=150&speed=8" http://192.168.4.1/peermanager/spoof
+```
+
+That starts a fake peer walking a 150 m-per-side hexagon at 8 m/s — you don't
+need to know or compute any coordinates yourself. Open the Follow panel's
+Status section (§3) and you should see the fake leader show up and get
+locked onto, with `Last Target` visibly updating as it moves around its
+patrol path — a real, moving target to check your configured slot tracks
+correctly, without needing a second physical aircraft in the air.
+
+The fake leader's altitude moves too, not just its lat/lon: it starts 10 m
+above your own aircraft's current altitude, climbs gradually up to 100 m at
+the halfway point of the patrol loop, then gradually descends back down to
+that starting altitude by the time the loop closes — useful for checking
+that your slot's vertical tracking (and Min Altitude Floor, §3) behaves
+correctly against a target that's actually climbing and descending, not just
+moving sideways.
+
+(`curl -X POST http://192.168.4.1/peermanager/spoof` with no other
+parameters instead generates five *stationary* practice peers in a ring
+around you — a quicker way to check "a leader shows up and gets locked onto"
+works, but not useful for watching the follower actually chase anything,
+since nothing in that ring moves.)
+
+**Safety:** this is a bench-test tool — treat it exactly like any other
+bench test in §5 above (props off; only arm if you fully understand what
+you're doing and why). The fake leader is not a real aircraft.
+
+There's currently no "turn spoofing off" endpoint — reboot the aircraft to
+return to real peer telemetry.
+
+For the full technical rundown — every parameter, the geometry math behind
+the patrol path, and a step-by-step checklist covering more advanced
+scenarios like a stale/lost leader — see
+[`docs/explainers/bench-testing-follow-mode.md`](explainers/bench-testing-follow-mode.md).
+
 ---
 
 ## 6. Showing Follow status on your OSD (GVARs) (Optional)
@@ -376,6 +427,7 @@ it pinned at exactly `32767`/`-32768`, widen that slot's range:
 ```
 gvar 0 0 -2000000000 2000000000
 gvar 1 0 -2000000000 2000000000
+gvar 3 0 -2000000000 2000000000
 save
 ```
 

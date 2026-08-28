@@ -66,6 +66,66 @@ curl http://192.168.4.1/peermanager/status
 take are the same units you'd naturally think in, the conversions happen
 inside `spoofPeer()`.
 
+### 1a. Making the leader move on its own (single-aircraft continuous chase)
+
+`spoofPeer()` above is stationary — good for one-shot geometry checks, but
+WP#255 just sits at a fixed point, so you never actually watch the follower
+*chase* anything. To exercise continuous tracking, freshness, and heading
+changes without a second physical aircraft, `PeerManager::spoofPeerHexPath()`
+(`PeerManager.cpp:263`) sends a spoofed peer around a closed regular-hexagon
+patrol path in real space, independent of your own position:
+
+```bash
+# Peer 1 patrols a hexagon with 150 m sides at 8 m/s, centered on wherever
+# your own (real or /gnssmanager/spoof'd) GNSS fix currently is
+curl -d "index=1&sideLength=150&speed=8" http://192.168.4.1/peermanager/spoof
+```
+
+Same `POST /peermanager/spoof` endpoint, keyed off the presence of
+`sideLength` (meters per edge) instead of a plain `lat`/`lon`. `lat`/`lon`
+are optional here too — supply them to center the hexagon on a specific
+point, or omit them and the center defaults to
+`GNSSManager::getSingleton()->getLocation()` **at the moment the POST is
+handled** (`WiFiManager.cpp`), so you don't need to know or compute
+coordinates up front. This only works as expected if your own location is
+already set to something real — if you haven't done `/gnssmanager/spoof` or
+have no GPS fix yet, `getLocation()` returns `lat=0, lon=0`
+(`GNSSManager.cpp:21-44`) and the hexagon centers in the Gulf of Guinea, so
+do step 2 below *before* triggering the hex path if you're omitting
+`lat`/`lon`.
+
+The peer walks each 60°-stepped edge at constant `speed`, snapping to the
+next edge's heading the instant it reaches a vertex — `groundCourse` holds
+steady through a leg then jumps by exactly 60° at each corner, and distance
+from the center oscillates between the apothem (`sideLength·cos(30°)`, edge
+midpoint) and `sideLength` itself (vertex). Confirmed against a Python mirror
+of the same math in `mock_server.py` (`HexPath.advance()`/`.position()`):
+150 m sides gave a 130–150 m distance envelope and clean 60° course jumps,
+matching the geometry exactly.
+
+Altitude also varies, gradually rather than in the horizontal path's discrete
+per-vertex jumps: it starts at your own current altitude
+(`GNSSManager::getLocation().alt`, captured once, at the moment the hex path
+is triggered) **+ 10 m**, climbs *linearly* to a fixed **100 m** at the
+halfway point of the loop — the vertex between the 3rd and 4th edge — then
+descends linearly back down to that start altitude by the time the loop
+closes. It's a "tent" shape over the whole 6-edge loop, not per-edge: climbing
+for 3 edges, then descending for the other 3, so you get a slow, continuous
+altitude change to test vertical tracking/relalt against, rather than a
+teleport. Verified the same way as the horizontal path — driving
+`mock_server.py`'s `HexPath.position()` directly at `total_progress`
+`0/300/600` m (for 100 m sides) gave altitude `start/peak/start` exactly, with
+linear values at the 50 m marks in between.
+
+Poll `GET /peermanager/status` repeatedly to
+watch it move — no `MSP`/FC connection needed just to see the peer walk the
+path, only to see `FollowManager` react to it (§"Practical bench walkthrough"
+below). To stop it, re-`POST` with `lat`/`lon` but no `sideLength` (pins that
+index static via `spoofPeer()` instead — this clears the hex path's active
+flag); a bare no-param `POST` only flips on the ring generator globally and
+does *not* stop an already-running hex path for that index, and there's no
+dedicated un-spoof endpoint, so a reboot is the fallback either way.
+
 ### 2. Spoofing your own location (easy to forget)
 
 This step is **not optional** for a useful bench test, and it's easy to miss
@@ -226,7 +286,9 @@ exposed.
    leader (§2 above) — do this first, since the sanity guard depends on it.
 3. `POST /peermanager/spoof` with a `lat`/`lon` offset from your spoofed own
    position by roughly the geometry preset you're testing, plus a `course`
-   and `speed` above `FOLLOW_MIN_COURSE_SPEED` (2 m/s default).
+   and `speed` above `FOLLOW_MIN_COURSE_SPEED` (2 m/s default). For a
+   continuous chase test instead of a single fixed target, use `sideLength`
+   (§1a above) to send the peer around a hexagon patrol path instead.
 4. `GET /peermanager/status` to confirm the peer shows up with the right
    `lat`/`lon`/`groundCourse`/`groundSpeed`, `lost: 0`.
 5. Arm the FC (props off) and switch on `NAV POSHOLD` + `GCS NAV`.

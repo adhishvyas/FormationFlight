@@ -18,6 +18,7 @@ Then open http://127.0.0.1:<port>/#/follow (or just / for the dashboard).
 import argparse
 import copy
 import json
+import math
 import re
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -84,9 +85,114 @@ def system_status():
     }
 
 
+EARTH_RADIUS_M = 6371000
+HEX_PATH_SIDES = 6
+HEX_PATH_PEAK_ALT_M = 100.0
+
+
+# Hand-maintained mirror of GNSSManager::calculatePointAtDistance() (src/lib/GNSS/
+# GNSSManager.cpp) so the hexagon-patrol mock below traces the same path the firmware would.
+def calculate_point_at_distance(lat, lon, distance_m, bearing_deg):
+    lat1 = math.radians(lat)
+    angular_distance = distance_m / EARTH_RADIUS_M
+    bearing_rad = math.radians(bearing_deg)
+    lat2 = math.asin(math.sin(lat1) * math.cos(angular_distance) +
+                      math.cos(lat1) * math.sin(angular_distance) * math.cos(bearing_rad))
+    lon2 = math.radians(lon) + math.atan2(
+        math.sin(bearing_rad) * math.sin(angular_distance) * math.cos(lat1),
+        math.cos(angular_distance) - math.sin(lat1) * math.sin(lat2))
+    return math.degrees(lat2), math.degrees(lon2)
+
+
+# Hand-maintained mirror of GNSSManager.cpp's distanceMeters()/courseDegrees() free functions.
+def distance_meters(lat1, lon1, lat2, lon2):
+    lat1r, lon1r, lat2r, lon2r = map(math.radians, (lat1, lon1, lat2, lon2))
+    u = math.sin((lat2r - lat1r) / 2)
+    v = math.sin((lon2r - lon1r) / 2)
+    return 2.0 * EARTH_RADIUS_M * math.asin(math.sqrt(u * u + math.cos(lat1r) * math.cos(lat2r) * v * v))
+
+
+def course_degrees(lat1, lon1, lat2, lon2):
+    dlon = math.radians(lon2 - lon1)
+    lat1r, lat2r = math.radians(lat1), math.radians(lat2)
+    a1 = math.sin(dlon) * math.cos(lat2r)
+    a2 = math.cos(lat1r) * math.sin(lat2r) - math.sin(lat1r) * math.cos(lat2r) * math.cos(dlon)
+    bearing = math.atan2(a1, a2)
+    if bearing < 0.0:
+        bearing += 2 * math.pi
+    return math.degrees(bearing)
+
+
+# Hand-maintained mirror of PeerManager::spoofPeerHexPath()/updateHexPathPeer() (src/lib/Peers/
+# PeerManager.cpp) for dev-only client testing of the "single aircraft, chase a moving fake
+# peer" bench-test workflow — not a substitute for the firmware's own math.
+class HexPath:
+    def __init__(self, center_lat, center_lon, side_length, speed, start_alt):
+        self.center_lat = center_lat
+        self.center_lon = center_lon
+        self.side_length = side_length
+        self.speed = speed
+        self.start_alt = start_alt
+        self.leg_index = 0
+        self.leg_progress = 0.0
+        self.last_update = time.time()
+
+    def advance(self):
+        now = time.time()
+        dt = now - self.last_update
+        self.last_update = now
+        self.leg_progress += self.speed * dt
+        while self.side_length > 0 and self.leg_progress >= self.side_length:
+            self.leg_progress -= self.side_length
+            self.leg_index = (self.leg_index + 1) % HEX_PATH_SIDES
+
+    def position(self):
+        step_deg = 360.0 / HEX_PATH_SIDES
+        leg_start_bearing = self.leg_index * step_deg
+        course = (leg_start_bearing + step_deg / 2.0 + 90.0) % 360.0
+        leg_start_lat, leg_start_lon = calculate_point_at_distance(
+            self.center_lat, self.center_lon, self.side_length, leg_start_bearing)
+        lat, lon = calculate_point_at_distance(leg_start_lat, leg_start_lon, self.leg_progress, course)
+
+        # Linear "tent": start_alt at the loop's start/end vertex, up to the fixed peak
+        # at the halfway vertex (after 3 of 6 edges), back down to start_alt at the close.
+        total_progress = self.leg_index * self.side_length + self.leg_progress
+        half_perimeter = 3.0 * self.side_length
+        altitude = self.start_alt
+        if half_perimeter > 0:
+            if total_progress <= half_perimeter:
+                altitude = self.start_alt + (HEX_PATH_PEAK_ALT_M - self.start_alt) * (total_progress / half_perimeter)
+            else:
+                fraction = (total_progress - half_perimeter) / half_perimeter
+                altitude = HEX_PATH_PEAK_ALT_M + (self.start_alt - HEX_PATH_PEAK_ALT_M) * fraction
+
+        return lat, lon, course, altitude
+
+
+HEX_PATHS = {}  # peer index -> HexPath, for /peermanager/spoof(sideLength=...)
+
+
 def peermanager_status():
-    return {"myID": "0", "count": len(PEERS), "countActive": len(PEERS),
-            "maxPeers": 8, "peers": PEERS}
+    peers = [dict(p) for p in PEERS]
+    for index, path in HEX_PATHS.items():
+        if index >= len(peers):
+            continue
+        path.advance()
+        lat, lon, course, altitude = path.position()
+        peers[index]["lat"] = lat
+        peers[index]["lon"] = lon
+        peers[index]["latRaw"] = int(lat * 1e6)
+        peers[index]["lonRaw"] = int(lon * 1e6)
+        peers[index]["groundCourse"] = int(course * 10)
+        peers[index]["groundSpeed"] = int(path.speed * 100)
+        peers[index]["alt"] = int(altitude)
+
+        g = gnssmanager_status()
+        peers[index]["distance"] = distance_meters(g["lat"], g["lon"], lat, lon)
+        peers[index]["courseTo"] = int(course_degrees(g["lat"], g["lon"], lat, lon))
+        peers[index]["relativeAltitude"] = int(altitude - g["alt"])
+    return {"myID": "0", "count": len(peers), "countActive": len(peers),
+            "maxPeers": 8, "peers": peers}
 
 
 def gnssmanager_status():
@@ -233,6 +339,22 @@ class Handler(BaseHTTPRequestHandler):
             CONFIG.clear()
             CONFIG.update(new_cfg)
             self._json(CONFIG)
+            return
+
+        if path == "/peermanager/spoof":
+            index = int(params.get("index", 0))
+            if "sideLength" in params:
+                side_length = float(params["sideLength"])
+                speed = float(params.get("speed", 0))
+                g = gnssmanager_status()
+                if "lat" in params and "lon" in params:
+                    lat, lon = float(params["lat"]), float(params["lon"])
+                else:
+                    lat, lon = g["lat"], g["lon"]
+                HEX_PATHS[index] = HexPath(lat, lon, side_length, speed, g["alt"] + 10.0)
+            else:
+                HEX_PATHS.pop(index, None)
+            self._text("OK", 200)
             return
 
         if path in ("/followmanager/commit", "/system/reboot"):

@@ -90,14 +90,32 @@ WiFiManager::WiFiManager()
         request->send(response);
     });
     server->on("/peermanager/spoof", HTTP_POST, [](AsyncWebServerRequest *request) {
-        // With lat & lon, position a single spoofed peer explicitly (repeatable bench testing).
-        // Without them, fall back to the original fixed 100m-ring of 5 peers.
-        if (request->hasParam("lat", true) && request->hasParam("lon", true)) {
+        // With sideLength, send a spoofed peer around a closed hexagon patrol path (repeatable
+        // bench testing of FollowManager against a moving target), centered on lat/lon if given,
+        // or on our own current GNSS fix at POST time if not - so it can be triggered without
+        // knowing coordinates up front. With just lat & lon (no sideLength), position a single
+        // spoofed peer explicitly instead. Without any of that, fall back to the original fixed
+        // 100m-ring of 5 peers.
+        if (request->hasParam("sideLength", true)) {
+            uint8_t index = request->hasParam("index", true) ? request->getParam("index", true)->value().toInt() : 0;
+            double sideLength = request->getParam("sideLength", true)->value().toDouble();
+            double speed = request->hasParam("speed", true) ? request->getParam("speed", true)->value().toDouble() : 0;
+            double lat, lon;
+            if (request->hasParam("lat", true) && request->hasParam("lon", true)) {
+                lat = request->getParam("lat", true)->value().toDouble();
+                lon = request->getParam("lon", true)->value().toDouble();
+            } else {
+                GNSSLocation loc = GNSSManager::getSingleton()->getLocation();
+                lat = loc.lat;
+                lon = loc.lon;
+            }
+            PeerManager::getSingleton()->spoofPeerHexPath(index, lat, lon, sideLength, speed);
+        } else if (request->hasParam("lat", true) && request->hasParam("lon", true)) {
             uint8_t index = request->hasParam("index", true) ? request->getParam("index", true)->value().toInt() : 0;
             double lat = request->getParam("lat", true)->value().toDouble();
             double lon = request->getParam("lon", true)->value().toDouble();
-            double course = request->hasParam("course", true) ? request->getParam("course", true)->value().toDouble() : 0;
             double speed = request->hasParam("speed", true) ? request->getParam("speed", true)->value().toDouble() : 0;
+            double course = request->hasParam("course", true) ? request->getParam("course", true)->value().toDouble() : 0;
             PeerManager::getSingleton()->spoofPeer(index, lat, lon, course, speed);
         } else {
             PeerManager::getSingleton()->enableSpoofing(true);

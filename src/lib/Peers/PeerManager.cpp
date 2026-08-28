@@ -141,6 +141,7 @@ void PeerManager::reset()
         strcpy(spoofedPeers[i].name, "");
 
         spoofOverride[i] = false;
+        spoofHexPaths[i].active = false;
     }
 }
 
@@ -181,6 +182,15 @@ void PeerManager::loop()
                 peer->relalt = peerLocation.alt - loc.alt;
             }
         }
+
+        for (int i = 0; i < NODES_MAX; i++)
+        {
+            if (spoofHexPaths[i].active)
+            {
+                updateHexPathPeer(i);
+            }
+        }
+
         lastUpdate = millis();
     }
 }
@@ -288,8 +298,112 @@ void PeerManager::spoofPeer(uint8_t index, double lat, double lon, double course
     spoofedPeers[index].name[3] = '\0';
     spoofedPeers[index].rssi = -50 + id;
 
+    spoofHexPaths[index].active = false;
     spoofOverride[index] = true;
     this->spoofingPeers = true;
+}
+
+// Starts peer `index` patrolling a closed regular-hexagon path (bench-test tooling), instead
+// of the fixed 100m-ring generated automatically by getSpoofedPeer(). Also enables spoofing.
+void PeerManager::spoofPeerHexPath(uint8_t index, double centerLat, double centerLon, double sideLength, double speed)
+{
+    if (index >= NODES_MAX)
+    {
+        return;
+    }
+
+    spoofHexPath_t &path = spoofHexPaths[index];
+    path.active = true;
+    path.centerLat = centerLat;
+    path.centerLon = centerLon;
+    path.sideLength = sideLength;
+    path.speed = speed;
+    path.startAlt = GNSSManager::getSingleton()->getLocation().alt + 10.0;
+    path.legIndex = 0;
+    path.legProgress = 0;
+    path.lastUpdate = millis();
+
+    uint8_t id = index + 1;
+    spoofedPeers[index].id = id;
+    spoofedPeers[index].state = 1;
+    spoofedPeers[index].lost = 0;
+    spoofedPeers[index].lq = 4;
+    spoofedPeers[index].name[0] = 'F';
+    spoofedPeers[index].name[1] = 'A';
+    spoofedPeers[index].name[2] = 'K' + index;
+    spoofedPeers[index].name[3] = '\0';
+    spoofedPeers[index].rssi = -50 + id;
+
+    spoofOverride[index] = true;
+    this->spoofingPeers = true;
+
+    updateHexPathPeer(index);
+}
+
+// Advances a hexagon-patrol peer by elapsed time and writes its new position/course into
+// spoofedPeers[index]. Vertices sit at 60-degree bearing steps around the path's center, each
+// sideLength meters out; the peer walks each edge at constant speed and takes the next edge's
+// heading the instant it reaches a vertex.
+void PeerManager::updateHexPathPeer(uint8_t index)
+{
+    spoofHexPath_t &path = spoofHexPaths[index];
+    uint32_t now = millis();
+    double dt = (now - path.lastUpdate) / 1000.0;
+    path.lastUpdate = now;
+
+    path.legProgress += path.speed * dt;
+    while (path.legProgress >= path.sideLength)
+    {
+        path.legProgress -= path.sideLength;
+        path.legIndex = (path.legIndex + 1) % HEX_PATH_SIDES;
+    }
+
+    const double stepDeg = 360.0 / HEX_PATH_SIDES;
+    double legStartBearing = path.legIndex * stepDeg;
+    // Tangent direction of a regular polygon's edge: perpendicular to the bisector of the
+    // vertex-to-vertex angle step.
+    double course = fmod(legStartBearing + stepDeg / 2.0 + 90.0, 360.0);
+
+    GNSSLocation center{.lat = path.centerLat, .lon = path.centerLon};
+    GNSSLocation legStart = GNSSManager::calculatePointAtDistance(center, path.sideLength, legStartBearing);
+    GNSSLocation pos = GNSSManager::calculatePointAtDistance(legStart, path.legProgress, course);
+
+    // Altitude is a linear "tent": startAlt at the loop's start/end vertex, rising to a fixed
+    // HEX_PATH_PEAK_ALT_M at the halfway vertex (after 3 of the 6 edges), then falling back to
+    // startAlt by the time the loop closes — gradual, not a step change at each vertex.
+    double totalProgress = path.legIndex * path.sideLength + path.legProgress;
+    double halfPerimeter = 3.0 * path.sideLength;
+    double altitude = path.startAlt;
+    if (halfPerimeter > 0)
+    {
+        if (totalProgress <= halfPerimeter)
+        {
+            altitude = path.startAlt + (HEX_PATH_PEAK_ALT_M - path.startAlt) * (totalProgress / halfPerimeter);
+        }
+        else
+        {
+            double fraction = (totalProgress - halfPerimeter) / halfPerimeter;
+            altitude = HEX_PATH_PEAK_ALT_M + (path.startAlt - HEX_PATH_PEAK_ALT_M) * fraction;
+        }
+    }
+
+    spoofedPeers[index].gps.lat = (int32_t)(pos.lat * 1000000);
+    spoofedPeers[index].gps.lon = (int32_t)(pos.lon * 1000000);
+    spoofedPeers[index].gps.alt = (int16_t)altitude;
+    spoofedPeers[index].gps.groundSpeed = (int16_t)(path.speed * 100); // m/s -> cm/s
+    spoofedPeers[index].gps.groundCourse = (int16_t)(course * 10);    // degrees -> degrees x 10
+
+    spoofedPeers[index].gps_pre = spoofedPeers[index].gps;
+    spoofedPeers[index].gps_pre_updated = now;
+    spoofedPeers[index].updated = now;
+
+    // Mirrors PeerManager::loop()'s distance/direction/relalt computation for real peers, so
+    // /peermanager/status reports live numbers for a hex-path peer instead of staying at 0.
+    GNSSManager *gnssManager = GNSSManager::getSingleton();
+    GNSSLocation peerLocation{.lat = pos.lat, .lon = pos.lon, .alt = altitude};
+    spoofedPeers[index].distance = gnssManager->horizontalDistanceTo(peerLocation);
+    spoofedPeers[index].direction = gnssManager->courseTo(peerLocation);
+    spoofedPeers[index].relalt = altitude - gnssManager->getLocation().alt;
 }
 
 bool peer_is_stale(const peer_t *peer, uint32_t timeout_ms)

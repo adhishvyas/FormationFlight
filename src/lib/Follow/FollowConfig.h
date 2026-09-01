@@ -158,3 +158,41 @@ enum FollowHeadingMode {
 #ifndef FOLLOW_DEBUG_HEADING_GVAR_INDEX
 #define FOLLOW_DEBUG_HEADING_GVAR_INDEX 3
 #endif
+
+// Speed autothrottle (spec docs/spec/2026-08-28-FollowSpeedAutothrottle.md).
+// GVAR indices, -1 = disabled, same convention as the status/condition GVARs
+// above. INAV supports indices 0-7.
+#ifndef FOLLOW_TARGET_SPEED_GVAR_INDEX
+#define FOLLOW_TARGET_SPEED_GVAR_INDEX -1
+#endif
+#ifndef FOLLOW_AUTOTHROTTLE_ENGAGE_GVAR_INDEX
+#define FOLLOW_AUTOTHROTTLE_ENGAGE_GVAR_INDEX -1
+#endif
+// Pilot's autothrottle arm switch (spec §3.2), 1-based MSP_RC channel, or -1
+// = unassigned (always armed).
+#ifndef FOLLOW_AUTOTHROTTLE_ENABLE_RC_CHANNEL
+#define FOLLOW_AUTOTHROTTLE_ENABLE_RC_CHANNEL -1
+#endif
+// Armed-range bounds (µs), a closed range rather than a single switch-high
+// threshold so the same two fields can express a 2-way, 3-way, or 6-pos
+// switch's specific "armed" detent(s) (spec §7 open question).
+#ifndef FOLLOW_AUTOTHROTTLE_ENABLE_MIN_THRESHOLD_US
+#define FOLLOW_AUTOTHROTTLE_ENABLE_MIN_THRESHOLD_US 1700
+#endif
+#ifndef FOLLOW_AUTOTHROTTLE_ENABLE_MAX_THRESHOLD_US
+#define FOLLOW_AUTOTHROTTLE_ENABLE_MAX_THRESHOLD_US 2100
+#endif
+// 0 = feedforward-only (pure leader-speed mirror) until bench-tuned (spec §7).
+#ifndef FOLLOW_SPEED_CORRECTION_KP
+#define FOLLOW_SPEED_CORRECTION_KP 0
+#endif
+// m/s. This clamp floor is the feature's only stall-safety mechanism this
+// iteration (spec §1.4/§3.5) — set it with real margin above the airframe's
+// actual stall speed (roughly a third above stall is a reasonable starting
+// point), since there is no dynamic sink-rate protection yet.
+#ifndef FOLLOW_MIN_TARGET_SPEED_MPS
+#define FOLLOW_MIN_TARGET_SPEED_MPS 5.0
+#endif
+#ifndef FOLLOW_MAX_TARGET_SPEED_MPS
+#define FOLLOW_MAX_TARGET_SPEED_MPS 30.0
+#endif

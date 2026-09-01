@@ -31,7 +31,8 @@ support isn't implemented.
 7. [Trimming the slot live with RC channels](#7-trimming-the-slot-live-with-rc-channels)
 8. [Troubleshooting](#8-troubleshooting)
 9. [Slot geometry diagram](#9-slot-geometry-diagram)
-10. [REST API reference: `/followmanager/config` and `/followmanager/status`](#10-rest-api-reference-followmanagerconfig-and-followmanagerstatus)
+10. [Speed Autothrottle (Fixed-Wing, Optional)](#10-speed-autothrottle-fixed-wing-optional)
+11. [REST API reference: `/followmanager/config` and `/followmanager/status`](#11-rest-api-reference-followmanagerconfig-and-followmanagerstatus)
 
 ---
 
@@ -603,9 +604,213 @@ fly this feature.
 
 ---
 
-## 10. REST API reference: `/followmanager/config` and `/followmanager/status`
+## 10. Speed Autothrottle (Fixed-Wing, Optional)
 
-<a name="10-rest-api-reference-followmanagerconfig-and-followmanagerstatus"></a>
+<a name="10-speed-autothrottle-fixed-wing-optional"></a>
+
+**This section only applies to a fixed-wing follower.** Position-following
+itself (§§1-9 above) is written and tested against a multirotor follower —
+fixed-wing followers are a known gap in that baseline, not something this
+guide claims is fully solved. This feature assumes your fixed-wing follower
+is already flying `NAV POSHOLD` + `GCS NAV` acceptably well on its own before
+you add speed control on top of it; if it isn't, fix that first — everything
+below only ever adjusts throttle, never position.
+
+### 10.1 What this adds
+
+Follow Mode by itself only ever commands a **position** — it has no opinion
+on how fast the follower gets there. On a fixed-wing follower that's often
+too sluggish to hold a tight slot when the leader speeds up, slows down, or
+turns: FF's position stream doesn't change, but the follower's own airspeed
+does. Speed Autothrottle closes that gap by having FF compute a target ground
+speed every cycle — matching the leader's own speed, then nudging it up or
+down depending on whether the follower is lagging behind or running ahead of
+its slot — and writing that number into an INAV Global Variable that drives a
+Programming Framework throttle override on the follower's flight controller.
+
+FF only ever writes two numbers: the target speed, and a 0/1 flag saying
+whether autothrottle should be active right now. INAV does the rest — this
+section is that one-time INAV setup, mirroring §6's OSD GVAR setup.
+
+**Requires INAV 9.0.0+** (for the GVAR writes) and an **airplane mixer** on
+the follower FC (checked automatically — see §10.3).
+
+### 10.2 Enable it in the Follow panel
+
+In the **Speed Autothrottle (Fixed-Wing)** section of the Follow panel, set:
+
+- **Target Speed GVAR Index** — which GVAR slot (`0`–`7`, or `Disabled`)
+  carries the commanded ground-speed setpoint (cm/s).
+- **Autothrottle Engage GVAR Index** — which GVAR slot carries the 0/1 engage
+  flag. Must be different from Target Speed GVAR Index, and from the §6
+  Status/Condition Flags indices if you've also enabled those — the UI blocks
+  picking the same slot twice.
+- **Arm Channel** *(optional)* — an RC channel to use as a hardware autothrottle
+  on/off switch, independent of the follow switch itself. Leave `Disabled` if
+  you want autothrottle to run automatically whenever Follow Mode is locked
+  onto a leader on a fixed-wing airframe, with no extra switch. If you assign
+  a channel, autothrottle is only active while that channel's pulse width
+  falls inside **Arm Range Min**/**Arm Range Max** (µs) — a range, not a
+  single threshold, so it can describe a 2-way switch (wide range covering
+  the whole high half of travel), a 3-way switch, or a specific position on a
+  6-pos switch, whichever you've physically wired.
+- **Slot-Lag Correction Gain** — how strongly to speed up/slow down beyond
+  the leader's raw ground speed to correct for lagging or leading the follow
+  slot. `0` (the default) means pure feedforward: just mirror the leader's
+  speed exactly, no correction. Leave this at `0` until you've flown the
+  feature once and have a specific lag/lead behavior you want to tighten up.
+- **Min Target Speed** / **Max Target Speed** — hard floor/ceiling on the
+  commanded speed, in m/s. **Min Target Speed is this feature's only
+  stall-safety mechanism** — there is no dynamic sink-rate/rescue correction.
+  Set it comfortably above this airframe's actual stall speed; roughly a
+  third above stall is a reasonable starting point, not a validated number
+  for your specific airframe.
+
+If the follower FC isn't currently reporting an airplane mixer, the two GVAR
+dropdowns and the tuning fields grey out with an explanatory tip — this is
+advisory (you can still fill them in ahead of time), but the firmware itself
+refuses to engage on anything other than an airplane mixer regardless of what
+you've configured (§10.3's real gate).
+
+### 10.3 The three-way engage gate
+
+Autothrottle only ever engages when **all three** of these are true, checked
+fresh every cycle with no latching:
+
+1. Follow Mode has a leader actively **locked** (same lock state as §3's
+   Status panel — `ACQUIRING`/`LOCKED_HOLDING`/gate-inactive all count as
+   not engaged).
+2. The follower FC is reporting an **airplane** mixer (checked automatically
+   over MSP — not something you configure, it's read live from INAV).
+3. The **Arm Channel** (§10.2), if you assigned one, is in its armed range.
+   Leave it `Disabled` and this condition is always satisfied.
+
+Losing any one of the three drops the engage flag to `0` and the aircraft
+falls through to INAV's own regular `NAV POSHOLD` speed behavior — it never
+holds a stale setpoint. This is what lets you run ordinary auto-follow
+(position only) on a fixed-wing aircraft with autothrottle switched off
+entirely, just by flipping the Arm Channel switch, with no web UI trip
+required.
+
+### 10.4 One-time INAV CLI setup
+
+Pick your two GVAR indices first (§10.2 above — the snippets below use
+`<E>` for Autothrottle Engage GVAR Index and `<T>` for Target Speed GVAR
+Index; **substitute your actual numbers (0-7) before pasting, don't paste
+`<E>`/`<T>` literally**). Paste the whole block into Configurator's **CLI**
+tab, then run `save`.
+
+```
+logic 33 1 -1 1 5 <E> 0 1 0
+logic 36 1 33 17 5 <T> 0 28 0
+
+logic 39 1 33 14 6 3 0 3000 0
+logic 40 1 33 17 4 39 0 2 0
+logic 41 1 33 43 0 1800 4 40 0
+logic 42 1 33 44 0 1250 4 41 0
+logic 43 1 33 44 4 41 4 42 0
+logic 44 1 33 29 4 43 0 0 0
+logic 45 1 33 17 4 43 0 10 0
+logic 46 1 33 15 4 45 0 100 0
+
+pid 3 1 5 <T> 2 9 800 550 80 400
+
+osd_custom_elements 0 2 171 2 172 18 46 2 33 ""
+osd_custom_elements 1 1 0 18 36 2 144 2 33 "TARGET "
+
+save
+```
+
+What this does:
+
+- `logic 33` reads your Autothrottle Engage GVAR — this is the *only* Logic
+  Condition INAV needs to know about FF's engage decision; everything
+  upstream of it (lock state, airframe check, arm switch) already happened
+  on the FF side before the GVAR was written.
+- `logic 36` is just the "TARGET" OSD readout's unit conversion — cosmetic,
+  not part of the control loop.
+- `logic 39`-`46` are the throttle-output chain: take Programmable PID 3's
+  output, offset and scale it into a servo-pulse range, and force-write it to
+  the throttle channel. This clamps to `1250`-`1800`µs — that's an
+  **actuator/hardware range**, not a speed bound; it has nothing to do with
+  Min/Max Target Speed above, which are already fully resolved before the
+  GVAR is written.
+- `pid 3` is the actual speed-hold PID: setpoint reads your Target Speed
+  GVAR directly, measurement reads the flight controller's own live ground
+  speed. This is the loop that actually turns "FF wants X m/s" into a real
+  throttle position.
+- The two `osd_custom_elements` lines add a throttle-% readout and the
+  "TARGET" speed readout to your OSD element list — drag them onto your OSD
+  layout in Configurator's **OSD** tab the same way §6.3 describes for the
+  status GVAR elements.
+
+This example uses Logic Condition slots `33`/`36`/`39`-`46`, Programmable
+PID slot `3`, and Custom OSD Element slots `0`/`1`. If any of those are
+already used by something else on your aircraft, use free slots instead and
+update the block's internal cross-references (the `33`s in the later lines
+refer back to `logic 33`) to match.
+
+**If you're editing an aircraft that already has the older reference
+autothrottle script** (`docs/explainers/inav-airspeed-autothrottle.md`) on
+it rather than starting from a blank Programming Framework: explicitly
+disable (set `enabled` to `0`) its old `LC0`-`LC5`, `LC12`, `LC20`-`LC38`,
+and `LC47`-`LC53` lines and its `osd_custom_elements 2`-`4` rather than
+leaving them in place unused — a Logic Condition that's still configured but
+no longer wired to anything real is exactly the confusing half-migrated
+state this rewrite exists to avoid.
+
+#### Fallback, if your INAV build rejects the `pid 3` line above
+
+A small number of INAV builds may not accept a flight-telemetry (ground
+speed) measurement source directly on a Programmable PID line. If `save`
+fails or PID3's live measurement value in Configurator doesn't track your
+GPS ground speed, use this fallback instead — only the `pid 3` line changes,
+plus five extra Logic Conditions feeding a scratch GVAR (`GVAR1` below is
+illustrative; pick any index that doesn't collide with `<E>`, `<T>`, or any
+other FF-assigned GVAR):
+
+```
+logic 0 1 -1 1 2 31 0 1 0
+logic 1 1 0 2 2 9 0 1000 0
+logic 2 1 0 13 4 1 4 3 0
+logic 3 1 -1 1 2 17 0 0 0
+logic 4 1 2 14 2 9 0 0 0
+logic 50 1 33 18 0 1 4 4 0
+
+pid 3 1 5 <T> 5 1 800 550 80 400
+```
+
+This fallback uses one additional GVAR (`GVAR1` above) beyond the primary
+block — worth remembering if you have other FF GVAR features (§6, `debug`)
+enabled simultaneously and are running low on INAV's 8-GVAR budget.
+
+### 10.5 Verify
+
+With the follower on the ground (props off) or in the air on an airplane
+mixer:
+
+1. Confirm `Speed Autothrottle` in the Follow panel shows **Engaged: yes**
+   once Follow Mode is locked onto a leader (real or [spoofed](#5-flying-it-engaging-follow-mode)),
+   with a target speed roughly matching the leader's ground speed.
+2. In Configurator's real-time monitor, confirm PID3's live setpoint tracks
+   your Target Speed GVAR's value, and its measurement tracks the FC's own
+   GPS ground speed.
+3. Flip your Arm Channel switch (if assigned) off — confirm the Follow
+   panel's **Engaged** indicator drops to **no** and PID3's setpoint stops
+   updating within a second or two. Flip it back on and confirm it resumes
+   immediately, with no re-lock needed.
+4. If your follower FC isn't an airplane mixer, confirm **Engaged** stays
+   **no** regardless of lock state — this is the airframe gate from §10.3
+   working as intended, not a bug.
+
+**Screenshot placeholder:** *[FPV goggles — OSD showing throttle % and TARGET
+speed readouts while autothrottle is engaged]*
+
+---
+
+## 11. REST API reference: `/followmanager/config` and `/followmanager/status`
+
+<a name="11-rest-api-reference-followmanagerconfig-and-followmanagerstatus"></a>
 
 Everything in the Follow panel is just a UI over two JSON endpoints served by
 the aircraft at `http://192.168.4.1/` (§1). This section is for anyone who
@@ -641,6 +846,14 @@ to change settings.
 | `rcLongChannel` | number | 1-based RC channel driving the longitudinal axis, or `-1` if disabled — §7 |
 | `rcLatChannel` | number | 1-based RC channel driving the lateral axis, or `-1` if disabled |
 | `rcVertChannel` | number | 1-based RC channel driving the vertical axis, or `-1` if disabled |
+| `targetSpeedGvarIndex` | number | GVAR index (`0`–`7`) for the autothrottle speed setpoint, or `-1` if disabled — §10 |
+| `autothrottleEngageGvarIndex` | number | GVAR index (`0`–`7`) for the autothrottle engage flag, or `-1` if disabled |
+| `autothrottleEnableRcChannel` | number | 1-based RC channel used as the autothrottle arm switch, or `-1` if unassigned (always armed) |
+| `autothrottleEnableMinThresholdUs` | number | Lower bound (µs) of the arm switch's "armed" pulse-width range |
+| `autothrottleEnableMaxThresholdUs` | number | Upper bound (µs) of the arm switch's "armed" pulse-width range |
+| `speedCorrectionKp` | number | Slot-lag correction gain — `0` is pure feedforward (mirror the leader's speed) |
+| `minTargetSpeedMps` | number | Lower clamp on the commanded autothrottle speed setpoint, m/s |
+| `maxTargetSpeedMps` | number | Upper clamp on the commanded autothrottle speed setpoint, m/s |
 | `debug` | boolean | RAM-only debug-GVAR toggle; always reports `false` after a reboot, never persisted |
 
 Example:
@@ -666,6 +879,14 @@ Example:
   "rcLongChannel": -1,
   "rcLatChannel": -1,
   "rcVertChannel": -1,
+  "targetSpeedGvarIndex": -1,
+  "autothrottleEngageGvarIndex": -1,
+  "autothrottleEnableRcChannel": -1,
+  "autothrottleEnableMinThresholdUs": 1700,
+  "autothrottleEnableMaxThresholdUs": 2100,
+  "speedCorrectionKp": 0,
+  "minTargetSpeedMps": 5,
+  "maxTargetSpeedMps": 30,
   "debug": false
 }
 ```
@@ -690,6 +911,9 @@ until a target has actually been sent at least once).
 | `lastTarget.ageMs` | number | Milliseconds since that target was sent |
 | `statusGvarValue` | number *(present once sent, if `statusGvarIndex >= 0`)* | Last status code written to the OSD GVAR — §6.1's table |
 | `conditionFlagsGvarValue` | number *(present once sent, if `conditionFlagsGvarIndex >= 0`)* | Last condition-flags code written to the OSD GVAR — §6.1's table |
+| `platformType` | number | The follower FC's detected mixer platform type (`0`=Multirotor, `1`=Airplane, `2`=Helicopter, `3`=Tricopter, `4`=Rover, `5`=Boat) — §10.3's airframe gate reads this |
+| `targetSpeedCmS` | number *(present once a target has been sent)* | Last computed autothrottle speed setpoint, cm/s — §10 |
+| `autothrottleEngaged` | boolean *(present once a target has been sent)* | Whether autothrottle is currently engaged — §10.3's three-way gate |
 | `liveOffset` | object *(present once a target has been sent)* | The actual offset in effect this cycle, after RC trim (§7) is applied |
 | `liveOffset.longM` | number | Live longitudinal offset, meters |
 | `liveOffset.latM` | number | Live lateral offset, meters |

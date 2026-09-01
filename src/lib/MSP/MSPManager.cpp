@@ -124,6 +124,30 @@ MSPHost MSPManager::getFCVariant()
     return HOST_NONE;
 }
 
+// Returns the connected FC's mixer platform type (MSP2_INAV_MIXER), cached
+// once we have a valid response, or if the host scan period timeout has
+// elapsed — same cache-once-per-connection shape as getFCVariant(). Doesn't
+// try to distinguish "not INAV" from "INAV but not yet answered" — both
+// correctly fall through to the same fail-closed INAV_PLATFORM_MULTIROTOR
+// default.
+InavPlatformType MSPManager::getPlatformType()
+{
+    static msp_mixer_config_t mixer{};
+    static bool cached = false;
+    if (sys.phase > MODE_HOST_SCAN)
+    {
+        cached = true;
+    }
+    if (!cached && ready && getFCVariant() == HOST_INAV)
+    {
+        if (msp->request2(MSP2_INAV_MIXER, &mixer, sizeof(mixer)))
+        {
+            cached = true;
+        }
+    }
+    return (InavPlatformType)mixer.platformType; // 0 == INAV_PLATFORM_MULTIROTOR if never populated
+}
+
 // Return whether the host provided is a flight controller, ergo understands GPS & analog values
 bool MSPManager::hostIsFlightController(MSPHost host)
 {

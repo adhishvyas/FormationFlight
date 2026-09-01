@@ -55,13 +55,27 @@ function validateConfig(cfg) {
   if (horizontalMag < STACKED_HORIZONTAL_EPSILON_M && Math.abs(vert) < cfg.minVSepM) {
     return { section: 'bounds', message: 'Stacked slot\'s vertical offset is below Min Vertical Separation (spec §7.4)' };
   }
-  if (cfg.statusGvarIndex !== -1 && cfg.statusGvarIndex === cfg.conditionFlagsGvarIndex) {
-    return { section: 'gvar', message: 'Status and Condition Flags GVAR indices must be different (or both Disabled)' };
+  const gvarFields = [
+    ['statusGvarIndex', 'Status'], ['conditionFlagsGvarIndex', 'Condition Flags'],
+    ['targetSpeedGvarIndex', 'Target Speed'], ['autothrottleEngageGvarIndex', 'Autothrottle Engage'],
+  ].filter(([k]) => cfg[k] !== -1);
+  for (let i = 0; i < gvarFields.length; i++) {
+    for (let j = i + 1; j < gvarFields.length; j++) {
+      if (cfg[gvarFields[i][0]] === cfg[gvarFields[j][0]]) {
+        return { section: 'gvar', message: `${gvarFields[i][1]} and ${gvarFields[j][1]} GVAR indices must be different (or both Disabled)` };
+      }
+    }
   }
 
   const rcChannels = [cfg.rcLongChannel, cfg.rcLatChannel, cfg.rcVertChannel].filter(c => c !== -1);
   if (new Set(rcChannels).size !== rcChannels.length) {
     return { section: 'rc', message: 'Each RC axis must use a different channel (or Disabled)' };
+  }
+  if (cfg.autothrottleEnableRcChannel !== -1 && rcChannels.includes(cfg.autothrottleEnableRcChannel)) {
+    return { section: 'autothrottle', message: 'Autothrottle Arm Channel must be different from the RC axis channels (or Disabled)' };
+  }
+  if (cfg.autothrottleEnableMaxThresholdUs <= cfg.autothrottleEnableMinThresholdUs) {
+    return { section: 'autothrottle', message: 'Autothrottle Arm Range Max must be greater than Min' };
   }
   return null;
 }
@@ -84,7 +98,18 @@ const headingModeOptions = [
   ['COURSE_RELATIVE', 'Offset From Course'],
 ];
 const gvarIndexOptions = [[-1, 'Disabled']].concat([0,1,2,3,4,5,6,7].map(i => [i, String(i)]));
-const rcChannelOptions = [[-1, 'Disabled']].concat(Array.from({length: 16}, (_, i) => [i + 1, String(i + 1)]));
+// A native <select> with 17 entries renders unreliably in Firefox for
+// Android (cuts off/mispositions), so RC channel fields use a +/- spinner
+// instead — -1 is the disabled sentinel, shown as "Disabled"; 1-16 are
+// channels.
+const rcChannelMin = -1;
+const rcChannelMax = 16;
+const rcChannelLabelFn = v => v === -1 ? 'Disabled' : String(v);
+
+// Mirrors InavPlatformType (src/lib/MSP/MSP.h) — only used for the
+// autothrottle platform-gate explanatory tip (spec §3.6).
+const platformTypeNames = ['Multirotor', 'Airplane', 'Helicopter', 'Tricopter', 'Rover', 'Boat'];
+const platformTypeName = t => platformTypeNames[t] || 'Unknown';
 
 export default function FollowPanel() {
   const [config, setConfig] = useState(null);
@@ -163,6 +188,15 @@ export default function FollowPanel() {
     body.append('rcLongChannel', config.rcLongChannel);
     body.append('rcLatChannel', config.rcLatChannel);
     body.append('rcVertChannel', config.rcVertChannel);
+
+    body.append('targetSpeedGvarIndex', config.targetSpeedGvarIndex);
+    body.append('autothrottleEngageGvarIndex', config.autothrottleEngageGvarIndex);
+    body.append('autothrottleEnableRcChannel', config.autothrottleEnableRcChannel);
+    body.append('autothrottleEnableMinThresholdUs', config.autothrottleEnableMinThresholdUs);
+    body.append('autothrottleEnableMaxThresholdUs', config.autothrottleEnableMaxThresholdUs);
+    body.append('speedCorrectionKp', config.speedCorrectionKp);
+    body.append('minTargetSpeedMps', config.minTargetSpeedMps);
+    body.append('maxTargetSpeedMps', config.maxTargetSpeedMps);
 
     body.append('debug', config.debug);
 
@@ -313,16 +347,44 @@ export default function FollowPanel() {
     <div class="py-2 px-5 flex-1 flex flex-col relative">
       ${sectionError('rc')}
       <div class="text-xs text-gray-500 mb-2">Once an axis has a channel assigned, its configured gap becomes a live-adjustable range (stick centered = centered slot, full deflection = the configured gap in that direction) rather than a fixed point.</div>
-      <${Setting} title="Longitudinal Channel" tip="RC channel that live-adjusts the longitudinal (ahead/behind) slot between -Gap and +Gap. Disabled uses the fixed configured value." value=${config.rcLongChannel} setfn=${mksetfn('rcLongChannel')} type="select" options=${rcChannelOptions} />
+      <${Setting} title="Longitudinal Channel" tip="RC channel that live-adjusts the longitudinal (ahead/behind) slot between -Gap and +Gap. -1 disables and uses the fixed configured value." value=${config.rcLongChannel} setfn=${mksetfn('rcLongChannel')} type="spinner" min=${rcChannelMin} max=${rcChannelMax} labelFn=${rcChannelLabelFn} />
       ${config.rcLongChannel !== -1 && config.ofsLongM === 0 && html`<div class="text-xs text-yellow-700 mb-2">Longitudinal Gap is 0 — this channel currently has no effect.<//>`}
-      <${Setting} title="Lateral Channel" tip="RC channel that live-adjusts the lateral (left/right) slot between -Gap and +Gap." value=${config.rcLatChannel} setfn=${mksetfn('rcLatChannel')} type="select" options=${rcChannelOptions} />
+      <${Setting} title="Lateral Channel" tip="RC channel that live-adjusts the lateral (left/right) slot between -Gap and +Gap. -1 disables." value=${config.rcLatChannel} setfn=${mksetfn('rcLatChannel')} type="spinner" min=${rcChannelMin} max=${rcChannelMax} labelFn=${rcChannelLabelFn} />
       ${config.rcLatChannel !== -1 && config.ofsLatM === 0 && html`<div class="text-xs text-yellow-700 mb-2">Lateral Gap is 0 — this channel currently has no effect.<//>`}
-      <${Setting} title="Vertical Channel" tip="RC channel that live-adjusts the vertical (above/below) slot between -Gap and +Gap." value=${config.rcVertChannel} setfn=${mksetfn('rcVertChannel')} type="select" options=${rcChannelOptions} />
+      <${Setting} title="Vertical Channel" tip="RC channel that live-adjusts the vertical (above/below) slot between -Gap and +Gap. -1 disables." value=${config.rcVertChannel} setfn=${mksetfn('rcVertChannel')} type="spinner" min=${rcChannelMin} max=${rcChannelMax} labelFn=${rcChannelLabelFn} />
       ${config.rcVertChannel !== -1 && config.ofsVertM === 0 && html`<div class="text-xs text-yellow-700 mb-2">Vertical Gap is 0 — this channel currently has no effect.<//>`}
       <div class="text-xs text-gray-500 mt-2">Crossing a stacked or in-line axis from one side of the leader to the other requires first widening one of the other two RC-assigned axes past Min Separation — the slot won't fly through the leader to get there. This is expected behavior, not a bug.</div>
       ${status.rcSlotFrozen && html`<div class="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-md px-3 py-2 text-sm mt-2">Slot is currently frozen at its last safe position — current RC input would produce an unsafe slot.<//>`}
       ${status.liveOffset && html`<div class="text-xs text-gray-500 mt-2">Live offset: ${status.liveOffset.longM.toFixed(1)}m long, ${status.liveOffset.latM.toFixed(1)}m lat, ${status.liveOffset.vertM.toFixed(1)}m vert<//>`}
       ${status.preArmCandidateOffset && html`<div class="text-xs text-gray-500 mt-2">Candidate offset (disarmed, bench-test): ${status.preArmCandidateOffset.longM.toFixed(1)}m long, ${status.preArmCandidateOffset.latM.toFixed(1)}m lat, ${status.preArmCandidateOffset.vertM.toFixed(1)}m vert<//>`}
+    <//>
+  <//>
+
+  <div class="py-1 divide-y border rounded bg-white flex flex-col">
+    <div class="font-light uppercase flex items-center text-gray-600 px-4 py-2">
+      Speed Autothrottle (Fixed-Wing)
+    <//>
+    <div class="py-2 px-5 flex-1 flex flex-col relative">
+      ${sectionError('gvar')}
+      ${sectionError('autothrottle')}
+      ${status.platformType !== 1 && html`<div class="bg-gray-50 border border-gray-200 text-gray-600 rounded-md px-3 py-2 text-sm mb-2">Requires a fixed-wing (airplane) mixer on the follower FC — detected platform: ${platformTypeName(status.platformType)}.<//>`}
+      <${Setting} title="Target Speed GVAR Index" tip="Which INAV Global Variable receives the commanded ground-speed setpoint (cm/s), fed directly into PID3's setpoint (spec §3.1)." value=${config.targetSpeedGvarIndex} setfn=${mksetfn('targetSpeedGvarIndex')} type="select" options=${gvarIndexOptions} disabled=${status.platformType !== 1} />
+      <${Setting} title="Autothrottle Engage GVAR Index" tip="Which INAV Global Variable receives the engage flag (1=engaged, 0=not) the INAV-side Logic Conditions use to gate the throttle override (spec §3.2)." value=${config.autothrottleEngageGvarIndex} setfn=${mksetfn('autothrottleEngageGvarIndex')} type="select" options=${gvarIndexOptions} disabled=${status.platformType !== 1} />
+      <${Setting} title="Arm Channel" tip="RC channel used as the autothrottle arm switch. -1 disables and means always armed whenever the lock/airframe conditions are otherwise satisfied. Pre-configurable even before a compatible FC is connected." value=${config.autothrottleEnableRcChannel} setfn=${mksetfn('autothrottleEnableRcChannel')} type="spinner" min=${rcChannelMin} max=${rcChannelMax} labelFn=${rcChannelLabelFn} />
+      <div class="flex gap-4">
+        <div class="flex-1"><${Setting} title="Arm Range Min" tip="Lower bound (µs) of the arm switch's 'armed' pulse-width range. Together with the max bound, this closed range lets a 2-way, 3-way, or 6-pos switch's specific detent(s) mean armed, not just a single switch-high threshold. Pre-configurable even before an Arm Channel is assigned." value=${config.autothrottleEnableMinThresholdUs} setfn=${mksetfn('autothrottleEnableMinThresholdUs')} type="number" addonRight="µs" /><//>
+        <div class="flex-1"><${Setting} title="Arm Range Max" tip="Upper bound (µs) of the arm switch's 'armed' pulse-width range." value=${config.autothrottleEnableMaxThresholdUs} setfn=${mksetfn('autothrottleEnableMaxThresholdUs')} type="number" addonRight="µs" /><//>
+      <//>
+      <${Setting} title="Slot-Lag Correction Gain" tip="How strongly to speed up/slow down beyond the leader's raw ground speed to correct for lagging/leading the follow slot (spec §4.3). 0 = pure feedforward (mirror the leader's speed exactly)." value=${config.speedCorrectionKp} setfn=${mksetfn('speedCorrectionKp')} type="number" disabled=${status.platformType !== 1} />
+      <${Setting} title="Min Target Speed" tip="Lower clamp on the commanded speed setpoint. Set comfortably above this airframe's stall speed (roughly a third above stall is a reasonable starting point) — there is no dynamic sink-rate protection yet, so this is the feature's only stall-safety mechanism this iteration." value=${config.minTargetSpeedMps} setfn=${mksetfn('minTargetSpeedMps')} type="number" addonRight="m/s" imperial=${asMph(config.minTargetSpeedMps)} disabled=${status.platformType !== 1} />
+      <${Setting} title="Max Target Speed" tip="Upper clamp on the commanded speed setpoint." value=${config.maxTargetSpeedMps} setfn=${mksetfn('maxTargetSpeedMps')} type="number" addonRight="m/s" imperial=${asMph(config.maxTargetSpeedMps)} disabled=${status.platformType !== 1} />
+      <div class="text-xs text-gray-500 mt-2">Requires INAV 9.0+ (GVARs) and MSP2_INAV_MIXER support (INAV 1.9+) on the follower FC — see docs/spec/2026-08-28-FollowSpeedAutothrottle.md for the required INAV-side Logic Condition rewrite.</div>
+      ${status.autothrottleEngaged !== undefined && html`
+      <div class="grid grid-cols-2 gap-2 my-1 pt-3 mt-2 border-t">
+        <label class="flex items-center text-sm text-gray-700 mr-2 font-medium">Engaged<//>
+        <div class="flex items-center"><${Colored} colors=${status.autothrottleEngaged ? tipColors.green : tipColors.gray} text=${status.autothrottleEngaged ? `yes (${(status.targetSpeedCmS / 100).toFixed(1)} m/s target)` : 'no'} /><//>
+      <//>
+      `}
     <//>
   <//>
 

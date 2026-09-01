@@ -256,6 +256,31 @@ int16_t FollowManager::resolveHeadingDeg(const peer_t *peer, double courseDeg) c
     return (int16_t)deg;
 }
 
+double FollowManager::resolveAlongTrackErrorM(const FollowTarget &target, double courseDeg) const
+{
+    GNSSLocation targetLoc{};
+    targetLoc.lat = (double)target.lat_1e7 / 1e7;
+    targetLoc.lon = (double)target.lon_1e7 / 1e7;
+    GNSSManager *gnss = GNSSManager::getSingleton();
+    double distM = gnss->horizontalDistanceTo(targetLoc);
+    double bearingRad = radians((double)gnss->courseTo(targetLoc));
+    double north_m = distM * cos(bearingRad);
+    double east_m  = distM * sin(bearingRad);
+    double th = radians(courseDeg);
+    return north_m * cos(th) + east_m * sin(th); // spec §4.2
+}
+
+int32_t FollowManager::resolveTargetSpeedCmS(const peer_t *peer, const FollowTarget &target, double courseDeg) const
+{
+    double alongTrackErrorM = resolveAlongTrackErrorM(target, courseDeg);
+    double targetSpeedCmS = (double)peer->gps.groundSpeed + (double)config.speedCorrectionKp * alongTrackErrorM;
+
+    double minCmS = config.minTargetSpeedMps * 100.0;
+    double maxCmS = config.maxTargetSpeedMps * 100.0;
+    targetSpeedCmS = constrain(targetSpeedCmS, minCmS, maxCmS);
+    return (int32_t)lround(targetSpeedCmS);
+}
+
 // Shared by loop() (runtime, has a live peer) and applyConfig() (server-side
 // §7.4 validation of a candidate config with no peer in scope yet) so both
 // always agree on the same two geometry rules. Only the two checks that
@@ -401,6 +426,20 @@ bool FollowManager::anyRcChannelAssigned() const
     return config.rcLongChannel != -1 || config.rcLatChannel != -1 || config.rcVertChannel != -1;
 }
 
+bool FollowManager::autothrottleArmed() const
+{
+    if (config.autothrottleEnableRcChannel < 1)
+    {
+        return true; // unassigned == always armed (spec §3.2)
+    }
+    uint16_t us;
+    if (!MSPManager::getSingleton()->getRcChannelUs((uint8_t)config.autothrottleEnableRcChannel, &us))
+    {
+        return true; // no FC connected — same fallback resolveAxisOffset() uses
+    }
+    return us >= config.autothrottleEnableMinThresholdUs && us <= config.autothrottleEnableMaxThresholdUs;
+}
+
 FollowOffset FollowManager::resolveCandidateOffset() const
 {
     return {
@@ -485,6 +524,7 @@ void FollowManager::loop()
         lockedName[0] = '\0';
         haveValidCourse = false;
         updateStatusGvars(rcPreArmCheckFailed ? FOLLOW_CONDITION_RC_INVALID_GAP_SETTINGS : FOLLOW_CONDITION_NONE);
+        updateAutothrottleGvars(false, 0);
         return;
     }
 
@@ -492,6 +532,7 @@ void FollowManager::loop()
     if (peer == nullptr)
     {
         updateStatusGvars(FOLLOW_CONDITION_NONE);
+        updateAutothrottleGvars(false, 0);
         return; // ACQUIRING or LOCKED_HOLDING this cycle — nothing to emit
     }
 
@@ -561,6 +602,7 @@ void FollowManager::loop()
     if (!offsetGeometrySane(offset, config.minSepM, config.minVSepM, nullptr))
     {
         updateStatusGvars(conditionCode);
+        updateAutothrottleGvars(false, 0);
         return;
     }
 
@@ -568,6 +610,7 @@ void FollowManager::loop()
     {
         raiseCondition(FOLLOW_CONDITION_TARGET_TOO_FAR);
         updateStatusGvars(conditionCode);
+        updateAutothrottleGvars(false, 0);
         return;
     }
 
@@ -577,6 +620,17 @@ void FollowManager::loop()
     int16_t headingDeg = resolveHeadingDeg(peer, courseDeg);
 
     updateDebugGvars(target.lat_1e7, target.lon_1e7, altCm, headingDeg);
+
+    // Speed autothrottle (spec §3.6): gated on a fixed-wing (airplane) mixer
+    // on the follower FC and the pilot's arm switch. engaged already folds
+    // in both, so downstream consumers of updateAutothrottleGvars() don't
+    // need to check either themselves.
+    bool autothrottleEngaged = MSPManager::getSingleton()->getPlatformType() == INAV_PLATFORM_AIRPLANE
+                             && autothrottleArmed();
+    int32_t targetSpeedCmS = autothrottleEngaged ? resolveTargetSpeedCmS(peer, target, courseDeg) : 0;
+    updateAutothrottleGvars(autothrottleEngaged, targetSpeedCmS);
+    lastAutothrottleEngaged = autothrottleEngaged;
+    lastTargetSpeedCmS = targetSpeedCmS;
 
     MSPManager *msp = MSPManager::getSingleton();
     // headingDeg is also passed to sendFollowWaypoint() below (WP#255's p1) —
@@ -638,6 +692,12 @@ void FollowManager::statusJson(JsonDocument *doc)
     if (config.conditionFlagsGvarIndex >= 0 && lastSentConditionFlagsGvarValue != INT32_MIN)
     {
         (*doc)["conditionFlagsGvarValue"] = lastSentConditionFlagsGvarValue;
+    }
+    (*doc)["platformType"] = (int)MSPManager::getSingleton()->getPlatformType();
+    if (haveLastTarget) // reuse the same "we've actually computed a target at least once" gate
+    {
+        (*doc)["targetSpeedCmS"] = lastTargetSpeedCmS;
+        (*doc)["autothrottleEngaged"] = lastAutothrottleEngaged;
     }
     if (haveLastTarget)
     {
@@ -706,6 +766,30 @@ void FollowManager::updateStatusGvars(FollowConditionCode conditionCode)
             lastSentConditionFlagsGvarValue = value;
             lastConditionFlagsGvarSendMs = now;
         }
+    }
+}
+
+void FollowManager::updateAutothrottleGvars(bool engaged, int32_t targetSpeedCmS)
+{
+    MSPManager *msp = MSPManager::getSingleton();
+    unsigned long now = millis();
+
+    if (config.autothrottleEngageGvarIndex >= 0)
+    {
+        int32_t value = engaged ? 1 : 0;
+        bool due = lastSentAutothrottleEngageValue == INT32_MIN
+                 || value != lastSentAutothrottleEngageValue
+                 || (now - lastAutothrottleEngageSendMs) >= FOLLOW_GVAR_HEARTBEAT_MS;
+        if (due)
+        {
+            msp->sendGvar((uint8_t)config.autothrottleEngageGvarIndex, value);
+            lastSentAutothrottleEngageValue = value;
+            lastAutothrottleEngageSendMs = now;
+        }
+    }
+    if (engaged && config.targetSpeedGvarIndex >= 0)
+    {
+        msp->sendGvar((uint8_t)config.targetSpeedGvarIndex, targetSpeedCmS);
     }
 }
 
@@ -794,6 +878,15 @@ void FollowManager::configJson(JsonDocument *doc) const
     (*doc)["rcLatChannel"] = config.rcLatChannel;
     (*doc)["rcVertChannel"] = config.rcVertChannel;
 
+    (*doc)["targetSpeedGvarIndex"] = config.targetSpeedGvarIndex;
+    (*doc)["autothrottleEngageGvarIndex"] = config.autothrottleEngageGvarIndex;
+    (*doc)["autothrottleEnableRcChannel"] = config.autothrottleEnableRcChannel;
+    (*doc)["autothrottleEnableMinThresholdUs"] = config.autothrottleEnableMinThresholdUs;
+    (*doc)["autothrottleEnableMaxThresholdUs"] = config.autothrottleEnableMaxThresholdUs;
+    (*doc)["speedCorrectionKp"] = config.speedCorrectionKp;
+    (*doc)["minTargetSpeedMps"] = config.minTargetSpeedMps;
+    (*doc)["maxTargetSpeedMps"] = config.maxTargetSpeedMps;
+
     // RAM only (spec: FollowConfig.h's FOLLOW_DEBUG_ENABLED comment) — not
     // in FollowEepromRecord, so this always reports false again after a
     // reboot regardless of what was last applied.
@@ -860,6 +953,27 @@ bool FollowManager::applyConfig(const FollowRuntimeConfig &newConfig, String *er
         *errMsg = "rcVertChannel must be -1 (disabled) or 1-16";
         return false;
     }
+    if (newConfig.targetSpeedGvarIndex < -1 || newConfig.targetSpeedGvarIndex > 7)
+    {
+        *errMsg = "targetSpeedGvarIndex must be -1 (disabled) or 0-7";
+        return false;
+    }
+    if (newConfig.autothrottleEngageGvarIndex < -1 || newConfig.autothrottleEngageGvarIndex > 7)
+    {
+        *errMsg = "autothrottleEngageGvarIndex must be -1 (disabled) or 0-7";
+        return false;
+    }
+    if (newConfig.autothrottleEnableRcChannel != -1 &&
+        (newConfig.autothrottleEnableRcChannel < 1 || newConfig.autothrottleEnableRcChannel > MSP_MAX_SUPPORTED_CHANNELS))
+    {
+        *errMsg = "autothrottleEnableRcChannel must be -1 (disabled) or 1-16";
+        return false;
+    }
+    if (newConfig.maxTargetSpeedMps <= newConfig.minTargetSpeedMps || newConfig.minTargetSpeedMps < 0)
+    {
+        *errMsg = "maxTargetSpeedMps must be > minTargetSpeedMps >= 0";
+        return false;
+    }
 
     // Spec §7.4 geometry rules, evaluated against the config's canonical
     // offset — mirrors loop()'s offsetGeometrySane() call so a config that's
@@ -920,6 +1034,15 @@ static FollowEepromRecord toEepromRecord(const FollowRuntimeConfig &config)
     record.rcLatChannel = config.rcLatChannel;
     record.rcVertChannel = config.rcVertChannel;
 
+    record.targetSpeedGvarIndex = config.targetSpeedGvarIndex;
+    record.autothrottleEngageGvarIndex = config.autothrottleEngageGvarIndex;
+    record.autothrottleEnableRcChannel = config.autothrottleEnableRcChannel;
+    record.autothrottleEnableMinThresholdUs = config.autothrottleEnableMinThresholdUs;
+    record.autothrottleEnableMaxThresholdUs = config.autothrottleEnableMaxThresholdUs;
+    record.speedCorrectionKp = config.speedCorrectionKp;
+    record.minTargetSpeedMps = (int16_t)lround(config.minTargetSpeedMps);
+    record.maxTargetSpeedMps = (int16_t)lround(config.maxTargetSpeedMps);
+
     return record;
 }
 
@@ -955,6 +1078,15 @@ static FollowRuntimeConfig fromEepromRecord(const FollowEepromRecord &record)
     config.rcLongChannel = record.rcLongChannel;
     config.rcLatChannel = record.rcLatChannel;
     config.rcVertChannel = record.rcVertChannel;
+
+    config.targetSpeedGvarIndex = record.targetSpeedGvarIndex;
+    config.autothrottleEngageGvarIndex = record.autothrottleEngageGvarIndex;
+    config.autothrottleEnableRcChannel = record.autothrottleEnableRcChannel;
+    config.autothrottleEnableMinThresholdUs = record.autothrottleEnableMinThresholdUs;
+    config.autothrottleEnableMaxThresholdUs = record.autothrottleEnableMaxThresholdUs;
+    config.speedCorrectionKp = record.speedCorrectionKp;
+    config.minTargetSpeedMps = record.minTargetSpeedMps;
+    config.maxTargetSpeedMps = record.maxTargetSpeedMps;
 
     return config;
 }

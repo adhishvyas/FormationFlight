@@ -181,14 +181,14 @@ WiFiManager::WiFiManager()
     });
     // FollowManager
     server->on("/followmanager/status", HTTP_GET, [](AsyncWebServerRequest *request) {
-        StaticJsonDocument<768> doc;
+        StaticJsonDocument<896> doc;
         FollowManager::getSingleton()->statusJson(&doc);
         AsyncResponseStream *response = request->beginResponseStream("application/json");
         serializeJson(doc, *response);
         request->send(response);
     });
     server->on("/followmanager/config", HTTP_GET, [](AsyncWebServerRequest *request) {
-        StaticJsonDocument<896> doc;
+        StaticJsonDocument<1280> doc;
         FollowManager::getSingleton()->configJson(&doc);
         AsyncResponseStream *response = request->beginResponseStream("application/json");
         serializeJson(doc, *response);
@@ -361,6 +361,16 @@ void handleFollowManagerConfigPost(AsyncWebServerRequest *request)
     if (request->hasParam("rcLongChannel", true)) cfg.rcLongChannel = (int16_t)strParam("rcLongChannel").toInt();
     if (request->hasParam("rcLatChannel", true)) cfg.rcLatChannel = (int16_t)strParam("rcLatChannel").toInt();
     if (request->hasParam("rcVertChannel", true)) cfg.rcVertChannel = (int16_t)strParam("rcVertChannel").toInt();
+
+    // Speed autothrottle (spec docs/spec/2026-08-28-FollowSpeedAutothrottle.md).
+    if (request->hasParam("targetSpeedGvarIndex", true)) cfg.targetSpeedGvarIndex = (int16_t)strParam("targetSpeedGvarIndex").toInt();
+    if (request->hasParam("autothrottleEngageGvarIndex", true)) cfg.autothrottleEngageGvarIndex = (int16_t)strParam("autothrottleEngageGvarIndex").toInt();
+    if (request->hasParam("autothrottleEnableRcChannel", true)) cfg.autothrottleEnableRcChannel = (int16_t)strParam("autothrottleEnableRcChannel").toInt();
+    if (request->hasParam("autothrottleEnableMinThresholdUs", true)) cfg.autothrottleEnableMinThresholdUs = (int16_t)strParam("autothrottleEnableMinThresholdUs").toInt();
+    if (request->hasParam("autothrottleEnableMaxThresholdUs", true)) cfg.autothrottleEnableMaxThresholdUs = (int16_t)strParam("autothrottleEnableMaxThresholdUs").toInt();
+    if (request->hasParam("speedCorrectionKp", true)) cfg.speedCorrectionKp = (int16_t)strParam("speedCorrectionKp").toInt();
+    if (request->hasParam("minTargetSpeedMps", true)) cfg.minTargetSpeedMps = strParam("minTargetSpeedMps").toDouble();
+    if (request->hasParam("maxTargetSpeedMps", true)) cfg.maxTargetSpeedMps = strParam("maxTargetSpeedMps").toDouble();
 
     // RAM only (never persisted — see FollowRuntimeConfig::debug).
     if (request->hasParam("debug", true)) cfg.debug = strParam("debug") == "true";

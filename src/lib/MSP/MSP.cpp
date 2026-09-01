@@ -240,6 +240,12 @@ bool MSP::request(uint8_t messageID, void * payload, uint8_t maxSize, uint8_t * 
 }
 
 
+bool MSP::request2(uint16_t messageID, void * payload, uint8_t maxSize, uint8_t * recvSize)
+{
+  send2(messageID, NULL, 0);
+  return waitFor2(messageID, payload, maxSize, recvSize);
+}
+
 // send message and wait for ack
 bool MSP::command(uint8_t messageID, void * payload, uint8_t size, bool waitACK)
 {

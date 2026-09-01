@@ -58,9 +58,19 @@ DEFAULT_CONFIG = {
     # something to show without needing to be configured first.
     "statusGvarIndex": 6, "conditionFlagsGvarIndex": 7,
     "rcLongChannel": -1, "rcLatChannel": -1, "rcVertChannel": -1,
+    "targetSpeedGvarIndex": -1, "autothrottleEngageGvarIndex": -1,
+    "autothrottleEnableRcChannel": -1,
+    "autothrottleEnableMinThresholdUs": 1700, "autothrottleEnableMaxThresholdUs": 2100,
+    "speedCorrectionKp": 0, "minTargetSpeedMps": 5.0, "maxTargetSpeedMps": 30.0,
     "debug": False,
 }
 CONFIG = copy.deepcopy(DEFAULT_CONFIG)
+
+# InavPlatformType (src/lib/MSP/MSP.h): 0=multirotor, 1=airplane, ... Flip
+# here, or override per-request with ?platformType=N on GET
+# /followmanager/status, to exercise the autothrottle panel's platform gate
+# (spec §3.6) without a real FC — there's no real MSP connection in this mock.
+MOCK_PLATFORM_TYPE = 1
 
 PEERS = [
     {"rawId": 1, "id": "1", "name": "Falcon", "updated": 0, "age": 120, "lost": 0,
@@ -215,7 +225,10 @@ def mspmanager_status():
             "vbat": 16.4, "mahDrawn": 812, "amps": 9.3}
 
 
-def followmanager_status():
+def followmanager_status(query=None):
+    query = query or {}
+    platform_type = int(query.get("platformType", [MOCK_PLATFORM_TYPE])[0])
+
     status_val = CONFIG["statusGvarIndex"]
     cond_val = CONFIG["conditionFlagsGvarIndex"]
     doc = {
@@ -229,6 +242,12 @@ def followmanager_status():
         doc["statusGvarValue"] = 2  # LOCKED
     if cond_val is not None and cond_val >= 0:
         doc["conditionFlagsGvarValue"] = 0  # no altitude-floor clamp active
+    doc["platformType"] = platform_type
+    # Mirrors FollowManager.cpp's airframe gate (spec §3.6) — this mock
+    # doesn't model the RC arm switch, only the platform-type half of the gate.
+    autothrottle_engaged = platform_type == 1  # INAV_PLATFORM_AIRPLANE
+    doc["autothrottleEngaged"] = autothrottle_engaged
+    doc["targetSpeedCmS"] = PEERS[0]["groundSpeed"] if autothrottle_engaged else 0
     doc["liveOffset"] = {
         "longM": CONFIG["ofsLongM"], "latM": CONFIG["ofsLatM"], "vertM": CONFIG["ofsVertM"],
     }
@@ -268,6 +287,19 @@ def validate_config(cfg):
         v = cfg.get(f, -1)
         if v != -1 and (v < 1 or v > 16):
             return f"{f} must be -1 (disabled) or 1-16"
+    for f in ("targetSpeedGvarIndex", "autothrottleEngageGvarIndex"):
+        v = cfg.get(f, -1)
+        if v < -1 or v > 7:
+            return f"{f} must be -1 (disabled) or 0-7"
+    art = cfg.get("autothrottleEnableRcChannel", -1)
+    if art != -1 and (art < 1 or art > 16):
+        return "autothrottleEnableRcChannel must be -1 (disabled) or 1-16"
+    # No min-vs-max ordering check for autothrottleEnableMinThresholdUs/
+    # autothrottleEnableMaxThresholdUs, matching applyConfig() — that check
+    # is UI-only (html/follow.js's validateConfig()), deliberately not
+    # duplicated here (spec plan's B work item note).
+    if cfg.get("maxTargetSpeedMps", 0) <= cfg.get("minTargetSpeedMps", 0) or cfg.get("minTargetSpeedMps", 0) < 0:
+        return "maxTargetSpeedMps must be > minTargetSpeedMps >= 0"
     return None
 
 
@@ -292,7 +324,11 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
+        if path == "/followmanager/status":
+            self._json(followmanager_status(parse_qs(parsed.query)))
+            return
         routes = {
             "/system/status": system_status,
             "/peermanager/status": peermanager_status,
@@ -300,7 +336,6 @@ class Handler(BaseHTTPRequestHandler):
             "/cryptomanager/status": cryptomanager_status,
             "/radiomanager/status": radiomanager_status,
             "/mspmanager/status": mspmanager_status,
-            "/followmanager/status": followmanager_status,
             "/followmanager/config": lambda: CONFIG,
         }
         if path in routes:
@@ -317,10 +352,15 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/followmanager/config":
             new_cfg = dict(CONFIG)
             float_fields = ["ofsLongM", "ofsLatM", "ofsVertM", "minSepM", "minVSepM",
-                             "maxTargetDistM", "minAltM", "minCourseSpeed", "headingDeg"]
+                             "maxTargetDistM", "minAltM", "minCourseSpeed", "headingDeg",
+                             "minTargetSpeedMps", "maxTargetSpeedMps"]
             int_fields = ["targetPeer", "emitHz", "peerTimeoutMs",
                           "statusGvarIndex", "conditionFlagsGvarIndex",
-                          "rcLongChannel", "rcLatChannel", "rcVertChannel"]
+                          "rcLongChannel", "rcLatChannel", "rcVertChannel",
+                          "targetSpeedGvarIndex", "autothrottleEngageGvarIndex",
+                          "autothrottleEnableRcChannel",
+                          "autothrottleEnableMinThresholdUs", "autothrottleEnableMaxThresholdUs",
+                          "speedCorrectionKp"]
             for f in float_fields:
                 if f in params:
                     new_cfg[f] = float(params[f])

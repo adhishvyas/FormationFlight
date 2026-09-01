@@ -91,6 +91,24 @@ struct FollowRuntimeConfig {
     int16_t rcLatChannel = FOLLOW_RC_LAT_CHANNEL;
     int16_t rcVertChannel = FOLLOW_RC_VERT_CHANNEL;
 
+    // Speed autothrottle (spec docs/spec/2026-08-28-FollowSpeedAutothrottle.md).
+    // GVAR indices, -1 = disabled, same convention/range (applyConfig(): -1
+    // or 0-7) as statusGvarIndex/conditionFlagsGvarIndex above.
+    int16_t targetSpeedGvarIndex = FOLLOW_TARGET_SPEED_GVAR_INDEX;
+    int16_t autothrottleEngageGvarIndex = FOLLOW_AUTOTHROTTLE_ENGAGE_GVAR_INDEX;
+    // Pilot's autothrottle arm switch (spec §3.2), 1-based MSP_RC channel, or
+    // -1 = unassigned (always armed). Armed while the channel's pulse width
+    // falls within [autothrottleEnableMinThresholdUs, autothrottleEnableMaxThresholdUs].
+    int16_t autothrottleEnableRcChannel = FOLLOW_AUTOTHROTTLE_ENABLE_RC_CHANNEL;
+    int16_t autothrottleEnableMinThresholdUs = FOLLOW_AUTOTHROTTLE_ENABLE_MIN_THRESHOLD_US;
+    int16_t autothrottleEnableMaxThresholdUs = FOLLOW_AUTOTHROTTLE_ENABLE_MAX_THRESHOLD_US;
+    // Slot-lag correction gain (spec §4.3), 0 = feedforward-only.
+    int16_t speedCorrectionKp = FOLLOW_SPEED_CORRECTION_KP;
+    // m/s clamp bounds for the autothrottle setpoint (spec §3.5). minTargetSpeedMps
+    // is this feature's only stall-safety mechanism this iteration (spec §1.4).
+    double minTargetSpeedMps = FOLLOW_MIN_TARGET_SPEED_MPS;
+    double maxTargetSpeedMps = FOLLOW_MAX_TARGET_SPEED_MPS;
+
     // RAM only, deliberately absent from FollowEepromRecord below — always
     // resets to false on reboot rather than persisting (see FollowConfig.h's
     // FOLLOW_DEBUG_ENABLED comment). When true, the follower's own commanded
@@ -122,7 +140,7 @@ struct FollowRuntimeConfig {
 // peerTimeoutMs/headingMode are already integer types in
 // FollowRuntimeConfig, so they're carried through unchanged, no conversion
 // needed.
-#define FOLLOW_EEPROM_VERSION 4
+#define FOLLOW_EEPROM_VERSION 5
 struct FollowEepromRecord {
     uint16_t version;
 
@@ -150,6 +168,15 @@ struct FollowEepromRecord {
     int16_t rcLongChannel;
     int16_t rcLatChannel;
     int16_t rcVertChannel;
+
+    int16_t targetSpeedGvarIndex;
+    int16_t autothrottleEngageGvarIndex;
+    int16_t autothrottleEnableRcChannel;
+    int16_t autothrottleEnableMinThresholdUs;
+    int16_t autothrottleEnableMaxThresholdUs;
+    int16_t speedCorrectionKp;
+    int16_t minTargetSpeedMps;
+    int16_t maxTargetSpeedMps;
 };
 
 // Projects a leader position + track-relative offset to an absolute lat/lon
@@ -219,6 +246,13 @@ private:
     int32_t lastSentConditionFlagsGvarValue = INT32_MIN;
     unsigned long lastStatusGvarSendMs = 0;
     unsigned long lastConditionFlagsGvarSendMs = 0;
+    int32_t lastSentAutothrottleEngageValue = INT32_MIN;
+    unsigned long lastAutothrottleEngageSendMs = 0;
+
+    // Last computed autothrottle setpoint/engage state (spec §3.1/§3.6), for
+    // statusJson() — set alongside lastTarget etc. at loop()'s success-path tail.
+    int32_t lastTargetSpeedCmS = 0;
+    bool lastAutothrottleEngaged = false;
 
     // "Last known good" RC-scaled offset triple (spec §4.4) — the freeze
     // target when a candidate fails either safety layer. Bootstrapped to the
@@ -294,6 +328,21 @@ private:
     // sentinel, and incidentally keeps it inside WP#255 p1's (0, 360)
     // exclusive range too (MSP_SET_HEAD itself has no such restriction).
     int16_t resolveHeadingDeg(const peer_t *peer, double courseDeg) const;
+    // Signed along-track distance (meters) from the follower's current position
+    // to `target`, in the leader's track frame (spec §4.2) — positive means the
+    // target is ahead of the follower (follower is lagging its slot).
+    double resolveAlongTrackErrorM(const FollowTarget &target, double courseDeg) const;
+    // Combines the leader's live ground speed and the along-track correction
+    // above into a clamped cm/s setpoint (spec §4.3).
+    int32_t resolveTargetSpeedCmS(const peer_t *peer, const FollowTarget &target, double courseDeg) const;
+    // The pilot's autothrottle arm switch (spec §3.2). Unassigned (< 1)
+    // resolves true — no restriction, matching this spec's pre-switch
+    // behavior. Otherwise armed while the channel's pulse width falls
+    // within [autothrottleEnableMinThresholdUs, autothrottleEnableMaxThresholdUs]
+    // — a closed range rather than a single switch-high threshold so the
+    // same two fields can describe a 2-way, 3-way, or 6-pos switch's specific
+    // "armed" detent(s). Read live every cycle, no edge-latch (spec §3.2).
+    bool autothrottleArmed() const;
     // Derives this cycle's GVAR values from current state and sends whichever
     // of the two configured GVARs (spec §3.4) changed or are due for their
     // heartbeat resend (spec §3.3). conditionCode is the caller-computed
@@ -307,4 +356,10 @@ private:
     // GVARs 0-3 (FOLLOW_DEBUG_*_GVAR_INDEX) every loop() cycle, gated on
     // config.debug.
     void updateDebugGvars(int32_t lat_1e7, int32_t lon_1e7, int32_t altCm, int16_t headingDeg);
+    // Writes autothrottleEngageGvarIndex (spec §3.2) every cycle (change+heartbeat
+    // gated, like updateStatusGvars()), and targetSpeedGvarIndex (spec §3.1)
+    // only when engaged. engaged already reflects the airframe gate (spec §3.6)
+    // and the RC arm switch (spec §3.2) — callers don't need to check either
+    // themselves.
+    void updateAutothrottleGvars(bool engaged, int32_t targetSpeedCmS);
 };

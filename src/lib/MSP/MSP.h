@@ -716,6 +716,10 @@ enum InavPlatformType {
     INAV_PLATFORM_TRICOPTER  = 3,
     INAV_PLATFORM_ROVER      = 4,
     INAV_PLATFORM_BOAT       = 5,
+    // Not a wire value — sentinel for "no MSP2_INAV_MIXER reply received yet",
+    // so callers/logs can tell "unanswered" apart from a real
+    // INAV_PLATFORM_MULTIROTOR (0) reply. 0xFF since platformType is a uint8_t.
+    INAV_PLATFORM_UNKNOWN    = 0xFF,
 };
 
 struct msp_radar_pos_t {

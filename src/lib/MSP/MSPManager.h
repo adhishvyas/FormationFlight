@@ -24,10 +24,14 @@ public:
     MSPHost getFCVariant();
     static bool hostIsFlightController(MSPHost host);
     // Returns the connected FC's mixer platform type (MSP2_INAV_MIXER, spec
-    // docs/spec/2026-08-28-FollowSpeedAutothrottle.md §2.4). Cached once per
-    // connection like getFCVariant(); defaults to INAV_PLATFORM_MULTIROTOR
-    // (the least permissive answer) until a real reply is received, so an
-    // unanswered/pre-connection query fails closed rather than open.
+    // docs/spec/2026-08-28-FollowSpeedAutothrottle.md §2.4). Cached once a
+    // valid reply is received; retried on every call until then (no
+    // sys.phase-based give-up, since — unlike getFCVariant() — this is never
+    // polled during MODE_HOST_SCAN). Returns INAV_PLATFORM_UNKNOWN until a
+    // real reply is received, distinguishable from a genuine
+    // INAV_PLATFORM_MULTIROTOR (0) reply; either way it's != INAV_PLATFORM_AIRPLANE,
+    // so an unanswered/pre-connection query still fails closed for the
+    // autothrottle gate that's this function's only caller.
     InavPlatformType getPlatformType();
     msp_fc_version_t getFCVersion();
     msp_raw_gps_t getLocation();

@@ -243,8 +243,11 @@ def followmanager_status(query=None):
     if cond_val is not None and cond_val >= 0:
         doc["conditionFlagsGvarValue"] = 0  # no altitude-floor clamp active
     doc["platformType"] = platform_type
-    # Mirrors FollowManager.cpp's airframe gate (spec §3.6) — this mock
-    # doesn't model the RC arm switch, only the platform-type half of the gate.
+    # Mirrors FollowManager::autothrottleArmed()'s "no FC connected" fallback
+    # (this mock has no real RC channel data to read) — always armed.
+    doc["autothrottleArmed"] = True
+    # Mirrors FollowManager.cpp's airframe gate (spec §3.6) combined with the
+    # arm switch above.
     autothrottle_engaged = platform_type == 1  # INAV_PLATFORM_AIRPLANE
     doc["autothrottleEngaged"] = autothrottle_engaged
     doc["targetSpeedCmS"] = PEERS[0]["groundSpeed"] if autothrottle_engaged else 0

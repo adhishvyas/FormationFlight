@@ -379,8 +379,14 @@ export default function FollowPanel() {
       <${Setting} title="Min Target Speed" tip="Lower clamp on the commanded speed setpoint. Set comfortably above this airframe's stall speed (roughly a third above stall is a reasonable starting point) — there is no dynamic sink-rate protection yet, so this is the feature's only stall-safety mechanism this iteration." value=${config.minTargetSpeedMps} setfn=${mksetfn('minTargetSpeedMps')} type="number" addonRight="m/s" imperial=${asMph(config.minTargetSpeedMps)} disabled=${status.platformType !== 1} />
       <${Setting} title="Max Target Speed" tip="Upper clamp on the commanded speed setpoint." value=${config.maxTargetSpeedMps} setfn=${mksetfn('maxTargetSpeedMps')} type="number" addonRight="m/s" imperial=${asMph(config.maxTargetSpeedMps)} disabled=${status.platformType !== 1} />
       <div class="text-xs text-gray-500 mt-2">Requires INAV 9.0+ (GVARs) and MSP2_INAV_MIXER support (INAV 1.9+) on the follower FC — see docs/spec/2026-08-28-FollowSpeedAutothrottle.md for the required INAV-side Logic Condition rewrite.</div>
-      ${status.autothrottleEngaged !== undefined && html`
+      ${status.autothrottleArmed !== undefined && html`
       <div class="grid grid-cols-2 gap-2 my-1 pt-3 mt-2 border-t">
+        <label class="flex items-center text-sm text-gray-700 mr-2 font-medium">RC Switch<//>
+        <div class="flex items-center"><${Colored} colors=${status.autothrottleArmed ? tipColors.green : tipColors.gray} text=${status.autothrottleArmed ? 'armed' : 'disarmed'} /><//>
+      <//>
+      `}
+      ${status.autothrottleEngaged !== undefined && html`
+      <div class="grid grid-cols-2 gap-2 my-1">
         <label class="flex items-center text-sm text-gray-700 mr-2 font-medium">Engaged<//>
         <div class="flex items-center"><${Colored} colors=${status.autothrottleEngaged ? tipColors.green : tipColors.gray} text=${status.autothrottleEngaged ? `yes (${(status.targetSpeedCmS / 100).toFixed(1)} m/s target)` : 'no'} /><//>
       <//>

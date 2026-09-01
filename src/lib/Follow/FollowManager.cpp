@@ -694,6 +694,7 @@ void FollowManager::statusJson(JsonDocument *doc)
         (*doc)["conditionFlagsGvarValue"] = lastSentConditionFlagsGvarValue;
     }
     (*doc)["platformType"] = (int)MSPManager::getSingleton()->getPlatformType();
+    (*doc)["autothrottleArmed"] = autothrottleArmed();
     if (haveLastTarget) // reuse the same "we've actually computed a target at least once" gate
     {
         (*doc)["targetSpeedCmS"] = lastTargetSpeedCmS;

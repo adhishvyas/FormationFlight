@@ -273,7 +273,19 @@ double FollowManager::resolveAlongTrackErrorM(const FollowTarget &target, double
 int32_t FollowManager::resolveTargetSpeedCmS(const peer_t *peer, const FollowTarget &target, double courseDeg) const
 {
     double alongTrackErrorM = resolveAlongTrackErrorM(target, courseDeg);
-    double targetSpeedCmS = (double)peer->gps.groundSpeed + (double)config.speedCorrectionKp * alongTrackErrorM;
+
+    // Kinematic braking law: v = sqrt(2*a*d) is the closing speed that lets
+    // the follower cover along-track error `d` while decelerating at `a` to
+    // land exactly on the leader's speed as d reaches 0 — no overshoot, and
+    // it naturally ramps hard when far behind/ahead of the slot and tapers
+    // smoothly on final approach, unlike a constant-gain linear term. float
+    // (sqrtf, not sqrt/double) because this MCU class has no hardware
+    // double-precision FPU, and the extra precision buys nothing here — the
+    // result is rounded to whole cm/s and clamped below anyway.
+    float errorCm = (float)(alongTrackErrorM * 100.0);
+    float aCmS2 = (float)config.speedCorrectionAccelCmS2;
+    float correctionCmS = copysignf(sqrtf(2.0f * aCmS2 * fabsf(errorCm)), errorCm);
+    double targetSpeedCmS = (double)peer->gps.groundSpeed + (double)correctionCmS;
 
     double minCmS = config.minTargetSpeedMps * 100.0;
     double maxCmS = config.maxTargetSpeedMps * 100.0;
@@ -884,7 +896,7 @@ void FollowManager::configJson(JsonDocument *doc) const
     (*doc)["autothrottleEnableRcChannel"] = config.autothrottleEnableRcChannel;
     (*doc)["autothrottleEnableMinThresholdUs"] = config.autothrottleEnableMinThresholdUs;
     (*doc)["autothrottleEnableMaxThresholdUs"] = config.autothrottleEnableMaxThresholdUs;
-    (*doc)["speedCorrectionKp"] = config.speedCorrectionKp;
+    (*doc)["speedCorrectionAccelCmS2"] = config.speedCorrectionAccelCmS2;
     (*doc)["minTargetSpeedMps"] = config.minTargetSpeedMps;
     (*doc)["maxTargetSpeedMps"] = config.maxTargetSpeedMps;
 
@@ -975,6 +987,14 @@ bool FollowManager::applyConfig(const FollowRuntimeConfig &newConfig, String *er
         *errMsg = "maxTargetSpeedMps must be > minTargetSpeedMps >= 0";
         return false;
     }
+    if (newConfig.speedCorrectionAccelCmS2 < 0)
+    {
+        // Unlike the old linear Kp, this is a magnitude fed through
+        // copysignf() in resolveTargetSpeedCmS() — a negative value would
+        // flip the correction to push the follower the wrong way.
+        *errMsg = "speedCorrectionAccelCmS2 must be >= 0";
+        return false;
+    }
 
     // Spec §7.4 geometry rules, evaluated against the config's canonical
     // offset — mirrors loop()'s offsetGeometrySane() call so a config that's
@@ -1040,7 +1060,7 @@ static FollowEepromRecord toEepromRecord(const FollowRuntimeConfig &config)
     record.autothrottleEnableRcChannel = config.autothrottleEnableRcChannel;
     record.autothrottleEnableMinThresholdUs = config.autothrottleEnableMinThresholdUs;
     record.autothrottleEnableMaxThresholdUs = config.autothrottleEnableMaxThresholdUs;
-    record.speedCorrectionKp = config.speedCorrectionKp;
+    record.speedCorrectionAccelCmS2 = config.speedCorrectionAccelCmS2;
     record.minTargetSpeedMps = (int16_t)lround(config.minTargetSpeedMps);
     record.maxTargetSpeedMps = (int16_t)lround(config.maxTargetSpeedMps);
 
@@ -1085,7 +1105,7 @@ static FollowRuntimeConfig fromEepromRecord(const FollowEepromRecord &record)
     config.autothrottleEnableRcChannel = record.autothrottleEnableRcChannel;
     config.autothrottleEnableMinThresholdUs = record.autothrottleEnableMinThresholdUs;
     config.autothrottleEnableMaxThresholdUs = record.autothrottleEnableMaxThresholdUs;
-    config.speedCorrectionKp = record.speedCorrectionKp;
+    config.speedCorrectionAccelCmS2 = record.speedCorrectionAccelCmS2;
     config.minTargetSpeedMps = record.minTargetSpeedMps;
     config.maxTargetSpeedMps = record.maxTargetSpeedMps;
 

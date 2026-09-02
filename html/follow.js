@@ -194,7 +194,7 @@ export default function FollowPanel() {
     body.append('autothrottleEnableRcChannel', config.autothrottleEnableRcChannel);
     body.append('autothrottleEnableMinThresholdUs', config.autothrottleEnableMinThresholdUs);
     body.append('autothrottleEnableMaxThresholdUs', config.autothrottleEnableMaxThresholdUs);
-    body.append('speedCorrectionKp', config.speedCorrectionKp);
+    body.append('speedCorrectionAccelCmS2', config.speedCorrectionAccelCmS2);
     body.append('minTargetSpeedMps', config.minTargetSpeedMps);
     body.append('maxTargetSpeedMps', config.maxTargetSpeedMps);
 
@@ -297,7 +297,7 @@ export default function FollowPanel() {
     <//>
   <//>
 
-  <div class="py-1 divide-y border rounded bg-white flex flex-col">
+  <div class="py-1 divide-y border rounded bg-white flex flex-col self-start">
     <div class="font-light uppercase flex items-center text-gray-600 px-4 py-2">
       Heading
     <//>
@@ -328,8 +328,9 @@ export default function FollowPanel() {
   <//>
 
   <div class="py-1 divide-y border rounded bg-white flex flex-col">
-    <div class="font-light uppercase flex items-center text-gray-600 px-4 py-2">
-      OSD Status (GVAR)
+    <div class="font-light uppercase flex items-center justify-between text-gray-600 px-4 py-2">
+      <span>OSD Status (GVAR)<//>
+      <${Colored} text="optional" />
     <//>
     <div class="py-2 px-5 flex-1 flex flex-col relative">
       ${sectionError('gvar')}
@@ -341,8 +342,9 @@ export default function FollowPanel() {
   <//>
 
   <div class="py-1 divide-y border rounded bg-white flex flex-col">
-    <div class="font-light uppercase flex items-center text-gray-600 px-4 py-2">
-      RC Axis Control
+    <div class="font-light uppercase flex items-center justify-between text-gray-600 px-4 py-2">
+      <span>RC Axis Control<//>
+      <${Colored} text="optional" />
     <//>
     <div class="py-2 px-5 flex-1 flex flex-col relative">
       ${sectionError('rc')}
@@ -361,8 +363,9 @@ export default function FollowPanel() {
   <//>
 
   <div class="py-1 divide-y border rounded bg-white flex flex-col">
-    <div class="font-light uppercase flex items-center text-gray-600 px-4 py-2">
-      Speed Autothrottle (Fixed-Wing)
+    <div class="font-light uppercase flex items-center justify-between text-gray-600 px-4 py-2">
+      <span>Speed Autothrottle (Fixed-Wing)<//>
+      <${Colored} text="optional" />
     <//>
     <div class="py-2 px-5 flex-1 flex flex-col relative">
       ${sectionError('gvar')}
@@ -375,7 +378,7 @@ export default function FollowPanel() {
         <div class="flex-1"><${Setting} title="Arm Range Min" tip="Lower bound (µs) of the arm switch's 'armed' pulse-width range. Together with the max bound, this closed range lets a 2-way, 3-way, or 6-pos switch's specific detent(s) mean armed, not just a single switch-high threshold. Pre-configurable even before an Arm Channel is assigned." value=${config.autothrottleEnableMinThresholdUs} setfn=${mksetfn('autothrottleEnableMinThresholdUs')} type="number" addonRight="µs" /><//>
         <div class="flex-1"><${Setting} title="Arm Range Max" tip="Upper bound (µs) of the arm switch's 'armed' pulse-width range." value=${config.autothrottleEnableMaxThresholdUs} setfn=${mksetfn('autothrottleEnableMaxThresholdUs')} type="number" addonRight="µs" /><//>
       <//>
-      <${Setting} title="Slot-Lag Correction Gain" tip="How strongly to speed up/slow down beyond the leader's raw ground speed to correct for lagging/leading the follow slot (spec §4.3). 0 = pure feedforward (mirror the leader's speed exactly)." value=${config.speedCorrectionKp} setfn=${mksetfn('speedCorrectionKp')} type="number" disabled=${status.platformType !== 1} />
+      <${Setting} title="Slot-Lag Correction Accel" tip="Max closing acceleration/deceleration used to speed up/slow down beyond the leader's raw ground speed and correct for lagging/leading the follow slot. Higher values catch up faster but brake harder on final approach into the slot; 0 = pure feedforward (mirror the leader's speed exactly)." value=${config.speedCorrectionAccelCmS2} setfn=${mksetfn('speedCorrectionAccelCmS2')} type="number" addonRight="cm/s²" disabled=${status.platformType !== 1} />
       <${Setting} title="Min Target Speed" tip="Lower clamp on the commanded speed setpoint. Set comfortably above this airframe's stall speed (roughly a third above stall is a reasonable starting point) — there is no dynamic sink-rate protection yet, so this is the feature's only stall-safety mechanism this iteration." value=${config.minTargetSpeedMps} setfn=${mksetfn('minTargetSpeedMps')} type="number" addonRight="m/s" imperial=${asMph(config.minTargetSpeedMps)} disabled=${status.platformType !== 1} />
       <${Setting} title="Max Target Speed" tip="Upper clamp on the commanded speed setpoint." value=${config.maxTargetSpeedMps} setfn=${mksetfn('maxTargetSpeedMps')} type="number" addonRight="m/s" imperial=${asMph(config.maxTargetSpeedMps)} disabled=${status.platformType !== 1} />
       <div class="text-xs text-gray-500 mt-2">Requires INAV 9.0+ (GVARs) and MSP2_INAV_MIXER support (INAV 1.9+) on the follower FC — see docs/spec/2026-08-28-FollowSpeedAutothrottle.md for the required INAV-side Logic Condition rewrite.</div>

@@ -182,9 +182,11 @@ enum FollowHeadingMode {
 #ifndef FOLLOW_AUTOTHROTTLE_ENABLE_MAX_THRESHOLD_US
 #define FOLLOW_AUTOTHROTTLE_ENABLE_MAX_THRESHOLD_US 2100
 #endif
-// 0 = feedforward-only (pure leader-speed mirror) until bench-tuned (spec §7).
-#ifndef FOLLOW_SPEED_CORRECTION_KP
-#define FOLLOW_SPEED_CORRECTION_KP 0
+// cm/s^2. Max closing acceleration/deceleration for the slot-lag kinematic
+// braking law (FollowManager::resolveTargetSpeedCmS()). 0 = feedforward-only
+// (pure leader-speed mirror) until bench-tuned (spec §7).
+#ifndef FOLLOW_SPEED_CORRECTION_ACCEL_CMS2
+#define FOLLOW_SPEED_CORRECTION_ACCEL_CMS2 0
 #endif
 // m/s. This clamp floor is the feature's only stall-safety mechanism this
 // iteration (spec §1.4/§3.5) — set it with real margin above the airframe's

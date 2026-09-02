@@ -654,11 +654,17 @@ In the **Speed Autothrottle (Fixed-Wing)** section of the Follow panel, set:
   single threshold, so it can describe a 2-way switch (wide range covering
   the whole high half of travel), a 3-way switch, or a specific position on a
   6-pos switch, whichever you've physically wired.
-- **Slot-Lag Correction Gain** — how strongly to speed up/slow down beyond
-  the leader's raw ground speed to correct for lagging or leading the follow
-  slot. `0` (the default) means pure feedforward: just mirror the leader's
-  speed exactly, no correction. Leave this at `0` until you've flown the
-  feature once and have a specific lag/lead behavior you want to tighten up.
+- **Slot-Lag Correction Accel** — max closing acceleration/deceleration (in
+  cm/s²) used to speed up/slow down beyond the leader's raw ground speed and
+  correct for lagging or leading the follow slot. This follows a kinematic
+  braking curve (`v = sqrt(2 · accel · distance)`), so it ramps up quickly
+  when the follower is far from its slot and tapers off smoothly as it
+  arrives, matching the leader's speed exactly once in slot — rather than a
+  constant-rate correction that's equally aggressive at any distance.
+  `0` (the default) means pure feedforward: just mirror the leader's speed
+  exactly, no correction. Leave this at `0` until you've flown the feature
+  once and have a specific lag/lead behavior you want to tighten up; higher
+  values catch up faster but brake harder right before reaching the slot.
 - **Min Target Speed** / **Max Target Speed** — hard floor/ceiling on the
   commanded speed, in m/s. **Min Target Speed is this feature's only
   stall-safety mechanism** — there is no dynamic sink-rate/rescue correction.
@@ -851,7 +857,7 @@ to change settings.
 | `autothrottleEnableRcChannel` | number | 1-based RC channel used as the autothrottle arm switch, or `-1` if unassigned (always armed) |
 | `autothrottleEnableMinThresholdUs` | number | Lower bound (µs) of the arm switch's "armed" pulse-width range |
 | `autothrottleEnableMaxThresholdUs` | number | Upper bound (µs) of the arm switch's "armed" pulse-width range |
-| `speedCorrectionKp` | number | Slot-lag correction gain — `0` is pure feedforward (mirror the leader's speed) |
+| `speedCorrectionAccelCmS2` | number | Slot-lag correction: max closing acceleration/deceleration, cm/s² — `0` is pure feedforward (mirror the leader's speed) |
 | `minTargetSpeedMps` | number | Lower clamp on the commanded autothrottle speed setpoint, m/s |
 | `maxTargetSpeedMps` | number | Upper clamp on the commanded autothrottle speed setpoint, m/s |
 | `debug` | boolean | RAM-only debug-GVAR toggle; always reports `false` after a reboot, never persisted |
@@ -884,7 +890,7 @@ Example:
   "autothrottleEnableRcChannel": -1,
   "autothrottleEnableMinThresholdUs": 1700,
   "autothrottleEnableMaxThresholdUs": 2100,
-  "speedCorrectionKp": 0,
+  "speedCorrectionAccelCmS2": 0,
   "minTargetSpeedMps": 5,
   "maxTargetSpeedMps": 30,
   "debug": false

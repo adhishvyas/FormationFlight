@@ -61,7 +61,7 @@ DEFAULT_CONFIG = {
     "targetSpeedGvarIndex": -1, "autothrottleEngageGvarIndex": -1,
     "autothrottleEnableRcChannel": -1,
     "autothrottleEnableMinThresholdUs": 1700, "autothrottleEnableMaxThresholdUs": 2100,
-    "speedCorrectionKp": 0, "minTargetSpeedMps": 5.0, "maxTargetSpeedMps": 30.0,
+    "speedCorrectionAccelCmS2": 0, "minTargetSpeedMps": 5.0, "maxTargetSpeedMps": 30.0,
     "debug": False,
 }
 CONFIG = copy.deepcopy(DEFAULT_CONFIG)
@@ -303,6 +303,8 @@ def validate_config(cfg):
     # duplicated here (spec plan's B work item note).
     if cfg.get("maxTargetSpeedMps", 0) <= cfg.get("minTargetSpeedMps", 0) or cfg.get("minTargetSpeedMps", 0) < 0:
         return "maxTargetSpeedMps must be > minTargetSpeedMps >= 0"
+    if cfg.get("speedCorrectionAccelCmS2", 0) < 0:
+        return "speedCorrectionAccelCmS2 must be >= 0"
     return None
 
 
@@ -363,7 +365,7 @@ class Handler(BaseHTTPRequestHandler):
                           "targetSpeedGvarIndex", "autothrottleEngageGvarIndex",
                           "autothrottleEnableRcChannel",
                           "autothrottleEnableMinThresholdUs", "autothrottleEnableMaxThresholdUs",
-                          "speedCorrectionKp"]
+                          "speedCorrectionAccelCmS2"]
             for f in float_fields:
                 if f in params:
                     new_cfg[f] = float(params[f])

@@ -368,7 +368,7 @@ void handleFollowManagerConfigPost(AsyncWebServerRequest *request)
     if (request->hasParam("autothrottleEnableRcChannel", true)) cfg.autothrottleEnableRcChannel = (int16_t)strParam("autothrottleEnableRcChannel").toInt();
     if (request->hasParam("autothrottleEnableMinThresholdUs", true)) cfg.autothrottleEnableMinThresholdUs = (int16_t)strParam("autothrottleEnableMinThresholdUs").toInt();
     if (request->hasParam("autothrottleEnableMaxThresholdUs", true)) cfg.autothrottleEnableMaxThresholdUs = (int16_t)strParam("autothrottleEnableMaxThresholdUs").toInt();
-    if (request->hasParam("speedCorrectionKp", true)) cfg.speedCorrectionKp = (int16_t)strParam("speedCorrectionKp").toInt();
+    if (request->hasParam("speedCorrectionAccelCmS2", true)) cfg.speedCorrectionAccelCmS2 = (int16_t)strParam("speedCorrectionAccelCmS2").toInt();
     if (request->hasParam("minTargetSpeedMps", true)) cfg.minTargetSpeedMps = strParam("minTargetSpeedMps").toDouble();
     if (request->hasParam("maxTargetSpeedMps", true)) cfg.maxTargetSpeedMps = strParam("maxTargetSpeedMps").toDouble();
 

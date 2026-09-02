@@ -102,8 +102,13 @@ struct FollowRuntimeConfig {
     int16_t autothrottleEnableRcChannel = FOLLOW_AUTOTHROTTLE_ENABLE_RC_CHANNEL;
     int16_t autothrottleEnableMinThresholdUs = FOLLOW_AUTOTHROTTLE_ENABLE_MIN_THRESHOLD_US;
     int16_t autothrottleEnableMaxThresholdUs = FOLLOW_AUTOTHROTTLE_ENABLE_MAX_THRESHOLD_US;
-    // Slot-lag correction gain (spec §4.3), 0 = feedforward-only.
-    int16_t speedCorrectionKp = FOLLOW_SPEED_CORRECTION_KP;
+    // Slot-lag correction: max closing acceleration/deceleration (cm/s^2)
+    // used by the kinematic braking law in resolveTargetSpeedCmS() —
+    // v = sqrt(2 * a * d), the speed that lets the follower close an
+    // along-track error `d` while still decelerating to exactly match the
+    // leader's speed by the time d reaches 0. 0 = feedforward-only (mirror
+    // the leader's speed exactly).
+    int16_t speedCorrectionAccelCmS2 = FOLLOW_SPEED_CORRECTION_ACCEL_CMS2;
     // m/s clamp bounds for the autothrottle setpoint (spec §3.5). minTargetSpeedMps
     // is this feature's only stall-safety mechanism this iteration (spec §1.4).
     double minTargetSpeedMps = FOLLOW_MIN_TARGET_SPEED_MPS;
@@ -140,7 +145,11 @@ struct FollowRuntimeConfig {
 // peerTimeoutMs/headingMode are already integer types in
 // FollowRuntimeConfig, so they're carried through unchanged, no conversion
 // needed.
-#define FOLLOW_EEPROM_VERSION 5
+// Bumped 6: speedCorrectionKp -> speedCorrectionAccelCmS2. Same int16_t
+// layout, but the stored value's meaning changed (linear gain -> kinematic
+// braking accel), so a stale record must fall back to defaults rather than
+// silently reinterpreting an old Kp as an accel.
+#define FOLLOW_EEPROM_VERSION 6
 struct FollowEepromRecord {
     uint16_t version;
 
@@ -174,7 +183,7 @@ struct FollowEepromRecord {
     int16_t autothrottleEnableRcChannel;
     int16_t autothrottleEnableMinThresholdUs;
     int16_t autothrottleEnableMaxThresholdUs;
-    int16_t speedCorrectionKp;
+    int16_t speedCorrectionAccelCmS2;
     int16_t minTargetSpeedMps;
     int16_t maxTargetSpeedMps;
 };

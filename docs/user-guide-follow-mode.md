@@ -15,8 +15,8 @@ guide.
 nothing beyond ordinary FF/INAV setup — it just needs to be broadcasting its
 position, which it's already doing if you can see it on the radar HUD.
 
-**Craft type:** the follower must be a multirotor. Fixed-wing follower
-support isn't implemented.
+**Craft type:** the follower must be a multirotor or a fixed-wing. Some differences
+in functionality exist for fixed-wing vs multirotor followers.
 
 ---
 
@@ -121,20 +121,20 @@ axis means, and how the leader's own heading rotates the whole slot with it.
 
 The factory default is **Behind 15 m, Center, Above 10 m** ("chase-high") —
 chosen because it keeps the follower clear of the leader's rotor wash while
-still being a sane geometry to bench-test with the leader sitting still on
-the ground.
+still being a sane geometry to bench-test with the leader sitting still or 
+moving on the ground.
 
 ### Safety Bounds
 
 | Field | Meaning |
 |---|---|
 | **Min Separation** | Smallest allowed straight-line (3D) distance from the leader. A slot that works out to less than this is rejected — this exists specifically to forbid an accidental "sit exactly on top of the leader" (0,0,0) configuration. |
-| **Min Vertical Separation (when stacked)** | When the slot is directly above/below the leader with no horizontal offset at all, the minimum vertical gap required. This is set well above the pure physical clearance you'd expect (13 m by default) because both aircrafts' GPS altitude has real error, and a stacked slot is the one geometry where that error alone could cause a collision. |
+| **Min Vertical Separation (when stacked)** | Specifically when the slot is directly above/below the leader with no horizontal offset at all, the minimum vertical gap required. This is set well above the pure physical clearance you'd expect (13 m by default) because both aircrafts' GPS altitude has real error, and a stacked slot is the one geometry where that error alone could cause a collision. |
 | **Max Target Distance** | If the leader is ever reported farther away than this, Follow Mode stops emitting rather than letting the follower chase indefinitely across an implausible distance (e.g. a bad GPS reading). |
 | **Min Altitude Floor** | The lowest altitude (home-relative) the follower will ever be commanded to, regardless of what the leader is doing. If the leader descends, lands, or you've configured a "Below" slot, the commanded altitude is clamped up to this floor rather than letting the follower fly toward or below ground level. It's a clamp, not a full stop — the follower keeps tracking the leader horizontally and just holds at the floor altitude. |
 | **Min Course Speed** | Below this ground speed, the leader's reported heading is too noisy to trust for orienting the slot (a stationary or near-stationary GPS course jitters unpredictably). Below this speed, FF freezes the slot's orientation at the last heading it trusted, rather than following that jitter. |
 
-The web UI blocks **Apply**/**Save** if your Follow Slot values violate Min
+The web UI blocks **Apply** if your Follow Slot values violate Min
 Separation or Min Vertical Separation — you'll see an inline error rather
 than being able to save an unsafe geometry.
 
@@ -283,7 +283,7 @@ scenarios like a stale/lost leader — see
 
 ---
 
-## 6. Showing Follow status on your OSD (GVARs) (Optional)
+## 6. Showing Follow status on your OSD (GVARs) [Optional]
 
 FF's web/status panel is not something you can see while flying goggles-in.
 To get follow-state feedback directly on your OSD, FF can write small status
@@ -350,9 +350,6 @@ osd_custom_elements 6 1 0 0 0 0 0 2 6 "BAD RC"
 save
 ```
 
-*(the exact `logic`/`osd_custom_elements` parameter values above haven't been
-bench-verified against a real INAV CLI session yet — verify before relying on
-them; see §6.4.)*
 
 What this does:
 
@@ -437,7 +434,7 @@ save
 
 ---
 
-## 7. Trimming the slot live with RC channels
+## 7. Trimming the slot live with RC channels [Optional]
 
 Landing, connecting to FF's web UI, editing a slot, and taking off again is
 slow if you just want to nudge the formation gap mid-flight. The **RC Axis
@@ -488,7 +485,7 @@ forbids for the static configuration. FF guards against this live:
 
 - Any candidate position that violates Min Separation / Min Vertical
   Separation is rejected outright for that cycle.
-- Beyond that, if your stick input would cause the slot to **cross** from one
+- Beyond that, if your slider input would cause the slot to **cross** from one
   side of the leader to the other (e.g. sweeping the vertical channel from
   "fully below" to "fully above" while horizontal is centered) while the
   *other* two axes don't yet provide enough separation on their own, that
@@ -496,8 +493,8 @@ forbids for the static configuration. FF guards against this live:
   passes directly through the leader's position for an instant.
 
 When either of these trips, the slot **freezes** at the last position it was
-safely holding — it stops responding to further stick movement in the unsafe
-direction — until you either move that stick back to a safe combination, or
+safely holding — it stops responding to further channel movement in the unsafe
+direction — until you either move that slider back to a safe combination, or
 widen one of the other RC-assigned axes past Min Separation first (the same
 way a real formation pass has to route *around* another aircraft, not through
 it). The Follow panel shows an inline warning (and, if you've set up the
@@ -508,11 +505,11 @@ Condition Flags GVAR, `3` on your OSD) whenever this freeze is active.
 Because the very first "safe position" the freeze logic knows about is your
 static configured slot, if your transmitter is already sitting somewhere
 that disagrees with that configured slot the instant you engage Follow Mode,
-you can get frozen away from your actual current stick position with no
+you can get frozen away from your actual current slider position with no
 warning beyond the OSD condition code.
 
 To catch this before it matters, FF continuously checks — **while the
-aircraft is disarmed only** — whether your current RC stick/channel
+aircraft is disarmed only** — whether your current RC slider/channel
 positions would produce a safe slot if Follow Mode were engaged right now,
 and whether they reproduce your configured static default on every
 RC-assigned axis. If either check fails, the Follow panel shows a red
@@ -604,17 +601,14 @@ fly this feature.
 
 ---
 
-## 10. Speed Autothrottle (Fixed-Wing, Optional)
+## 10. Speed Autothrottle (Fixed-Wing) [Optional]
 
 <a name="10-speed-autothrottle-fixed-wing-optional"></a>
 
-**This section only applies to a fixed-wing follower.** Position-following
-itself (§§1-9 above) is written and tested against a multirotor follower —
-fixed-wing followers are a known gap in that baseline, not something this
-guide claims is fully solved. This feature assumes your fixed-wing follower
-is already flying `NAV POSHOLD` + `GCS NAV` acceptably well on its own before
-you add speed control on top of it; if it isn't, fix that first — everything
-below only ever adjusts throttle, never position.
+**This section only applies to a fixed-wing follower.** This feature assumes 
+your fixed-wing follower is already flying `NAV POSHOLD` + `GCS NAV` acceptably 
+well on its own before you add speed control on top of it; if it isn't, 
+fix that first — everything below only ever adjusts throttle, never position.
 
 ### 10.1 What this adds
 
@@ -740,7 +734,11 @@ What this does:
   the throttle channel. This clamps to `1250`-`1800`µs — that's an
   **actuator/hardware range**, not a speed bound; it has nothing to do with
   Min/Max Target Speed above, which are already fully resolved before the
-  GVAR is written.
+  GVAR is written. This essentially limits the throttle to go between 25% and 80%
+  to ensure that you don't drop the throttle too low that it could cause ESC
+  de-sync issues when it throttles up quickly and you don't overdrive the motor
+  and craft by being pegged at 100% throttle for a long time. You can change 
+  those values if you feel comfortable pushing your craft further.
 - `pid 3` is the actual speed-hold PID: setpoint reads your Target Speed
   GVAR directly, measurement reads the flight controller's own live ground
   speed. This is the loop that actually turns "FF wants X m/s" into a real
@@ -756,16 +754,9 @@ already used by something else on your aircraft, use free slots instead and
 update the block's internal cross-references (the `33`s in the later lines
 refer back to `logic 33`) to match.
 
-**If you're editing an aircraft that already has the older reference
-autothrottle script** (`docs/explainers/inav-airspeed-autothrottle.md`) on
-it rather than starting from a blank Programming Framework: explicitly
-disable (set `enabled` to `0`) its old `LC0`-`LC5`, `LC12`, `LC20`-`LC38`,
-and `LC47`-`LC53` lines and its `osd_custom_elements 2`-`4` rather than
-leaving them in place unused — a Logic Condition that's still configured but
-no longer wired to anything real is exactly the confusing half-migrated
-state this rewrite exists to avoid.
-
 #### Fallback, if your INAV build rejects the `pid 3` line above
+
+**NOT FULLY TESTED. USE AT YOUR OWN RISK**
 
 A small number of INAV builds may not accept a flight-telemetry (ground
 speed) measurement source directly on a Programmable PID line. If `save`

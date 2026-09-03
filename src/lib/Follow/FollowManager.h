@@ -4,6 +4,7 @@
 #include <ArduinoJson.h>
 #include "FollowConfig.h"
 #include "../Peers/PeerManager.h"
+#include "FollowDeps.h"
 
 enum FollowLockState {
     FOLLOW_LOCK_IDLE = 0,
@@ -198,6 +199,11 @@ FollowTarget slotToLatLon(int32_t peer_lat_1e6, int32_t peer_lon_1e6, double cou
 class FollowManager
 {
 public:
+    // deps are borrowed pointers, not owned -- production wiring
+    // (getSingleton(), FollowProdAdapters.cpp) points them at
+    // process-lifetime real adapters; tests point them at fakes with
+    // whatever lifetime the test itself manages.
+    FollowManager(IFollowMsp *msp, IFollowGnss *gnss, IFollowPeers *peers);
     void loop();
     // Read-only snapshot for GET /followmanager/status (spec §10.2): PeerLock
     // state, locked peer id/name (if any), gate active/inactive, and the last
@@ -229,6 +235,10 @@ public:
     static FollowManager *getSingleton();
 
 private:
+    IFollowMsp *msp;
+    IFollowGnss *gnss;
+    IFollowPeers *peers;
+
     FollowRuntimeConfig config;
     unsigned long lastEepromCommitMs = 0;
     FollowLockState state = FOLLOW_LOCK_IDLE;

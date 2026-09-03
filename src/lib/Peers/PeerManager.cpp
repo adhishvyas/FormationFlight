@@ -406,18 +406,3 @@ void PeerManager::updateHexPathPeer(uint8_t index)
     spoofedPeers[index].relalt = altitude - gnssManager->getLocation().alt;
 }
 
-bool peer_is_stale(const peer_t *peer, uint32_t timeout_ms)
-{
-    if (peer == nullptr || peer->id == 0)
-    {
-        return true;
-    }
-
-    if (peer->lost)
-    {
-        return true;
-    }
-
-    return (millis() - peer->updated) > timeout_ms;
-}
-

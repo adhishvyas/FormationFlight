@@ -1,5 +1,4 @@
 #include "FollowManager.h"
-#include "../MSP/MSPManager.h"
 #include "../GNSS/GNSSManager.h"
 #include "main.h"
 #include <math.h>
@@ -66,24 +65,23 @@ FollowTarget slotToLatLon(int32_t peer_lat_1e6, int32_t peer_lon_1e6, double cou
     return target;
 }
 
-FollowManager *followManager = nullptr;
-
-FollowManager *FollowManager::getSingleton()
+FollowManager::FollowManager(IFollowMsp *msp, IFollowGnss *gnss, IFollowPeers *peers)
+    : msp(msp), gnss(gnss), peers(peers)
 {
-    if (followManager == nullptr)
-    {
-        followManager = new FollowManager();
-        followManager->loadFromEEPROM();
-    }
-    return followManager;
 }
+
+// FollowManager::getSingleton() is defined in FollowProdAdapters.cpp,
+// alongside the real adapters it wires FollowManager up to -- kept out of
+// this file so the native test env (which excludes FollowProdAdapters.cpp)
+// never needs to link the concrete MSPManager/GNSSManager/PeerManager
+// singletons (spec docs/spec/2026-09-03-FollowTestSuite.md §3.2).
 
 bool FollowManager::followSwitchActive()
 {
     switch (FOLLOW_TRIGGER_MODE)
     {
         case FOLLOW_TRIGGER_GCSNAV:
-            return MSPManager::getSingleton()->isGCSNavActive();
+            return msp->isGCSNavActive();
         case FOLLOW_TRIGGER_AUX:
         default:
             // AUX-channel trigger is a later phase (spec §5[C] option 1, not
@@ -94,8 +92,6 @@ bool FollowManager::followSwitchActive()
 
 const peer_t *FollowManager::resolveLock()
 {
-    PeerManager *peerManager = PeerManager::getSingleton();
-
     if (state == FOLLOW_LOCK_IDLE)
     {
         state = FOLLOW_LOCK_ACQUIRING;
@@ -107,7 +103,7 @@ const peer_t *FollowManager::resolveLock()
 
         if (config.targetPeer != 0)
         {
-            const peer_t *p = peerManager->getPeerById(config.targetPeer);
+            const peer_t *p = peers->getPeerById(config.targetPeer);
             if (p != nullptr && !peer_is_stale(p, config.peerTimeoutMs))
             {
                 candidate = p;
@@ -117,7 +113,7 @@ const peer_t *FollowManager::resolveLock()
         {
             for (uint8_t i = 0; i < NODES_MAX; i++)
             {
-                const peer_t *p = peerManager->getPeer(i);
+                const peer_t *p = peers->getPeer(i);
                 if (p != nullptr && p->id > 0 && !peer_is_stale(p, config.peerTimeoutMs))
                 {
                     candidate = p;
@@ -140,7 +136,7 @@ const peer_t *FollowManager::resolveLock()
 
     if (state == FOLLOW_LOCK_LOCKED)
     {
-        const peer_t *p = peerManager->getPeerById(lockedId);
+        const peer_t *p = peers->getPeerById(lockedId);
         if (p == nullptr || peer_is_stale(p, config.peerTimeoutMs))
         {
             state = FOLLOW_LOCK_LOCKED_HOLDING;
@@ -152,7 +148,7 @@ const peer_t *FollowManager::resolveLock()
     // FOLLOW_LOCK_LOCKED_HOLDING: keep checking the same locked id for
     // freshness every cycle, but never scan for or switch to another peer
     // (spec §6.3 — no automatic failover).
-    const peer_t *p = peerManager->getPeerById(lockedId);
+    const peer_t *p = peers->getPeerById(lockedId);
     if (p != nullptr && !peer_is_stale(p, config.peerTimeoutMs))
     {
         if (strncmp(p->name, lockedName, sizeof(lockedName)) == 0)
@@ -220,7 +216,7 @@ int16_t FollowManager::resolveHeadingDeg(const peer_t *peer, double courseDeg) c
             GNSSLocation leaderLoc{};
             leaderLoc.lat = (double)peer->gps.lat / 1e6;
             leaderLoc.lon = (double)peer->gps.lon / 1e6;
-            raw = (double)GNSSManager::getSingleton()->courseTo(leaderLoc);
+            raw = (double)gnss->courseTo(leaderLoc);
             break;
         }
         case FOLLOW_HEADING_FIXED:
@@ -261,7 +257,6 @@ double FollowManager::resolveAlongTrackErrorM(const FollowTarget &target, double
     GNSSLocation targetLoc{};
     targetLoc.lat = (double)target.lat_1e7 / 1e7;
     targetLoc.lon = (double)target.lon_1e7 / 1e7;
-    GNSSManager *gnss = GNSSManager::getSingleton();
     double distM = gnss->horizontalDistanceTo(targetLoc);
     double bearingRad = radians((double)gnss->courseTo(targetLoc));
     double north_m = distM * cos(bearingRad);
@@ -416,7 +411,7 @@ double FollowManager::resolveAxisOffset(double configuredM, int16_t channel1Base
     }
 
     uint16_t us;
-    if (!MSPManager::getSingleton()->getRcChannelUs((uint8_t)channel1Based, &us))
+    if (!msp->getRcChannelUs((uint8_t)channel1Based, &us))
     {
         return configuredM; // no FC connected, or channel1Based out of MSP_RC's range (spec §3.2)
     }
@@ -445,7 +440,7 @@ bool FollowManager::autothrottleArmed() const
         return true; // unassigned == always armed (spec §3.2)
     }
     uint16_t us;
-    if (!MSPManager::getSingleton()->getRcChannelUs((uint8_t)config.autothrottleEnableRcChannel, &us))
+    if (!msp->getRcChannelUs((uint8_t)config.autothrottleEnableRcChannel, &us))
     {
         return true; // no FC connected — same fallback resolveAxisOffset() uses
     }
@@ -485,7 +480,7 @@ bool FollowManager::targetTooFar(const FollowTarget &target) const
     GNSSLocation targetLoc{};
     targetLoc.lat = (double)target.lat_1e7 / 1e7;
     targetLoc.lon = (double)target.lon_1e7 / 1e7;
-    double distFromSelf = GNSSManager::getSingleton()->horizontalDistanceTo(targetLoc);
+    double distFromSelf = gnss->horizontalDistanceTo(targetLoc);
     return distFromSelf > config.maxTargetDistM;
 }
 
@@ -512,7 +507,7 @@ void FollowManager::loop()
     // never reports stale while armed (spec §7's gating for rcPreArmCheckFailed).
     rcPreArmCheckFailed = false;
     havePreArmCandidateOffset = false;
-    if (MSPManager::getSingleton()->getState() == 0 && anyRcChannelAssigned())
+    if (msp->getState() == 0 && anyRcChannelAssigned())
     {
         // Read-only: deliberately does not touch lastKnownGood (spec §4.6's
         // "never write to lastKnownGood" requirement) — this is a
@@ -560,7 +555,7 @@ void FollowManager::loop()
     // relalt*100 is exact but offset.vertical_m*100 generally isn't
     // (spec §6.2 — this frame mixing is a known accuracy bound, not a bug;
     // see FOLLOW_MIN_VSEP_M's GPS-error margin).
-    double altCmD = (double)MSPManager::getSingleton()->local_altitude_cm()
+    double altCmD = (double)msp->local_altitude_cm()
                    + (double)peer->relalt * 100.0
                    + offset.vertical_m * 100.0;
     int32_t altCm = (int32_t)lround(altCmD);
@@ -637,14 +632,13 @@ void FollowManager::loop()
     // on the follower FC and the pilot's arm switch. engaged already folds
     // in both, so downstream consumers of updateAutothrottleGvars() don't
     // need to check either themselves.
-    bool autothrottleEngaged = MSPManager::getSingleton()->getPlatformType() == INAV_PLATFORM_AIRPLANE
+    bool autothrottleEngaged = msp->getPlatformType() == INAV_PLATFORM_AIRPLANE
                              && autothrottleArmed();
     int32_t targetSpeedCmS = autothrottleEngaged ? resolveTargetSpeedCmS(peer, target, courseDeg) : 0;
     updateAutothrottleGvars(autothrottleEngaged, targetSpeedCmS);
     lastAutothrottleEngaged = autothrottleEngaged;
     lastTargetSpeedCmS = targetSpeedCmS;
 
-    MSPManager *msp = MSPManager::getSingleton();
     // headingDeg is also passed to sendFollowWaypoint() below (WP#255's p1) —
     // currently inert on INAV 9.x for a follower in NAV POSHOLD_3D, kept as a
     // forward-compatible best-effort write (see that function's comment).
@@ -705,7 +699,7 @@ void FollowManager::statusJson(JsonDocument *doc)
     {
         (*doc)["conditionFlagsGvarValue"] = lastSentConditionFlagsGvarValue;
     }
-    (*doc)["platformType"] = (int)MSPManager::getSingleton()->getPlatformType();
+    (*doc)["platformType"] = (int)msp->getPlatformType();
     (*doc)["autothrottleArmed"] = autothrottleArmed();
     if (haveLastTarget) // reuse the same "we've actually computed a target at least once" gate
     {
@@ -750,7 +744,6 @@ static int32_t statusGvarValue(FollowLockState state, uint8_t lockedId)
 
 void FollowManager::updateStatusGvars(FollowConditionCode conditionCode)
 {
-    MSPManager *msp = MSPManager::getSingleton();
     unsigned long now = millis();
 
     if (config.statusGvarIndex >= 0)
@@ -784,7 +777,6 @@ void FollowManager::updateStatusGvars(FollowConditionCode conditionCode)
 
 void FollowManager::updateAutothrottleGvars(bool engaged, int32_t targetSpeedCmS)
 {
-    MSPManager *msp = MSPManager::getSingleton();
     unsigned long now = millis();
 
     if (config.autothrottleEngageGvarIndex >= 0)
@@ -823,13 +815,11 @@ void FollowManager::updateDebugGvars(int32_t lat_1e7, int32_t lon_1e7, int32_t a
     GNSSLocation targetLoc{};
     targetLoc.lat = (double)lat_1e7 / 1e7;
     targetLoc.lon = (double)lon_1e7 / 1e7;
-    GNSSManager *gnss = GNSSManager::getSingleton();
     double distM = gnss->horizontalDistanceTo(targetLoc);
     double bearingRad = radians((double)gnss->courseTo(targetLoc));
     int32_t northOffsetCm = (int32_t)lround(distM * cos(bearingRad) * 100.0);
     int32_t eastOffsetCm = (int32_t)lround(distM * sin(bearingRad) * 100.0);
 
-    MSPManager *msp = MSPManager::getSingleton();
     msp->sendGvar(FOLLOW_DEBUG_NORTH_GVAR_INDEX, northOffsetCm);
     msp->sendGvar(FOLLOW_DEBUG_EAST_GVAR_INDEX, eastOffsetCm);
     msp->sendGvar(FOLLOW_DEBUG_ALT_GVAR_INDEX, altCm);

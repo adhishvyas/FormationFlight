@@ -91,5 +91,20 @@ private:
 
 // The locked peer is stale if it hasn't updated within timeout_ms, or is flagged lost.
 // Deliberately takes the timeout as a parameter rather than a hardcoded constant so this
-// helper has no dependency on the follow module's configuration.
-bool peer_is_stale(const peer_t *peer, uint32_t timeout_ms);
+// helper has no dependency on the follow module's configuration. Kept inline (rather than
+// in PeerManager.cpp) so it links into the native Follow test env without pulling in the
+// rest of PeerManager.cpp's hardware-only dependencies.
+inline bool peer_is_stale(const peer_t *peer, uint32_t timeout_ms)
+{
+    if (peer == nullptr || peer->id == 0)
+    {
+        return true;
+    }
+
+    if (peer->lost)
+    {
+        return true;
+    }
+
+    return (millis() - peer->updated) > timeout_ms;
+}

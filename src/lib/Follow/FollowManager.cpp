@@ -1,4 +1,5 @@
 #include "FollowManager.h"
+#include "FollowInternal.h"
 #include "../GNSS/GNSSManager.h"
 #include "main.h"
 #include <math.h>
@@ -294,7 +295,7 @@ int32_t FollowManager::resolveTargetSpeedCmS(const peer_t *peer, const FollowTar
 // depend purely on the configured offset — not on a live peer/target — live
 // here; targetTooFar()'s max-distance-from-self check has no equivalent at
 // config-validation time and stays in targetTooFar() below.
-static bool offsetGeometrySane(const FollowOffset &offset, double minSepM, double minVSepM, String *errMsg)
+bool offsetGeometrySane(const FollowOffset &offset, double minSepM, double minVSepM, String *errMsg)
 {
     double horizontalMag = sqrt(offset.longitudinal_m * offset.longitudinal_m +
                                  offset.lateral_m * offset.lateral_m);
@@ -323,7 +324,7 @@ static bool offsetGeometrySane(const FollowOffset &offset, double minSepM, doubl
 // the *smaller* of the other two axes' combined magnitude at the
 // reference point and at the candidate point (spec §4.3's conservative
 // choice, covering two RC-assigned axes swinging in the same cycle).
-static bool axisSignLocked(double candidateAxis, double referenceAxis,
+bool axisSignLocked(double candidateAxis, double referenceAxis,
                             double candidateOther1, double candidateOther2,
                             double referenceOther1, double referenceOther2,
                             double minSepM)
@@ -346,7 +347,7 @@ static bool axisSignLocked(double candidateAxis, double referenceAxis,
 // lastKnownGood on a pass) and the §4.6 pre-arm advisory check (which
 // never mutates state) — both callers must always agree on the same
 // answer for the same inputs.
-static bool candidateOffsetOk(const FollowOffset &candidate, const FollowOffset &reference,
+bool candidateOffsetOk(const FollowOffset &candidate, const FollowOffset &reference,
                                double minSepM, double minVSepM)
 {
     if (!offsetGeometrySane(candidate, minSepM, minVSepM, nullptr))
@@ -383,7 +384,7 @@ static bool candidateOffsetOk(const FollowOffset &candidate, const FollowOffset 
 // value, or the pre-arm warning stays lit. Axes with no RC channel
 // assigned always match trivially, since resolveAxisOffset() returns
 // configuredM verbatim for them.
-static bool rcCandidateMatchesStaticDefault(const FollowOffset &candidate, const FollowRuntimeConfig &config)
+bool rcCandidateMatchesStaticDefault(const FollowOffset &candidate, const FollowRuntimeConfig &config)
 {
     if (config.rcLongChannel != -1 &&
         fabs(candidate.longitudinal_m - config.ofsLongM) > FOLLOW_PREARM_MATCH_EPSILON_M)

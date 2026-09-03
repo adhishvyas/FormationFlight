@@ -94,6 +94,14 @@ extern void test_autothrottle_armed_when_channel_unassigned();
 extern void test_autothrottle_armed_when_assigned_channel_read_fails();
 extern void test_autothrottle_armed_only_within_threshold_range();
 
+// test_gvar_reporting.cpp (spec §4.11)
+extern void test_gvar_first_cycle_always_sends_even_when_value_is_zero();
+extern void test_gvar_resends_immediately_when_value_changes();
+extern void test_gvar_unchanged_value_not_resent_before_heartbeat();
+extern void test_gvar_unchanged_value_resent_after_heartbeat_elapses();
+extern void test_gvar_index_minus_one_never_sends();
+extern void test_condition_code_priority_highest_value_wins_not_first_computed();
+
 int main(int argc, char **argv)
 {
     UNITY_BEGIN();
@@ -173,6 +181,13 @@ int main(int argc, char **argv)
     RUN_TEST(test_autothrottle_armed_when_channel_unassigned);
     RUN_TEST(test_autothrottle_armed_when_assigned_channel_read_fails);
     RUN_TEST(test_autothrottle_armed_only_within_threshold_range);
+
+    RUN_TEST(test_gvar_first_cycle_always_sends_even_when_value_is_zero);
+    RUN_TEST(test_gvar_resends_immediately_when_value_changes);
+    RUN_TEST(test_gvar_unchanged_value_not_resent_before_heartbeat);
+    RUN_TEST(test_gvar_unchanged_value_resent_after_heartbeat_elapses);
+    RUN_TEST(test_gvar_index_minus_one_never_sends);
+    RUN_TEST(test_condition_code_priority_highest_value_wins_not_first_computed);
 
     return UNITY_END();
 }

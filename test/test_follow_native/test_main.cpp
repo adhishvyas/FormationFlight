@@ -69,6 +69,31 @@ extern void test_course_above_threshold_uses_live_ground_course();
 extern void test_course_dropping_below_threshold_holds_last_valid_course();
 extern void test_course_below_threshold_from_first_cycle_falls_back_to_reported_value();
 
+// test_rc_axis_and_prearm.cpp (spec §4.7/§4.9)
+extern void test_axis_offset_no_channel_assigned_returns_configured_unchanged();
+extern void test_axis_offset_msp_read_failure_falls_back_to_configured();
+extern void test_axis_offset_center_maps_to_zero();
+extern void test_axis_offset_full_deflection_maps_to_plus_and_minus_gap();
+extern void test_axis_offset_out_of_range_us_clamps_to_nearest_endpoint();
+extern void test_prearm_candidate_computed_every_cycle_while_disarmed_with_axis_assigned();
+extern void test_prearm_forced_false_and_absent_while_armed_regardless_of_assignment();
+extern void test_prearm_failed_flag_is_not_sticky_across_arm_transition();
+extern void test_prearm_center_with_nonzero_default_fails_check();
+extern void test_prearm_matching_static_default_passes_check();
+
+// test_autothrottle.cpp (spec §4.10)
+extern void test_engage_gate_false_when_not_locked();
+extern void test_engage_gate_false_when_locked_but_not_airplane();
+extern void test_engage_gate_false_when_arm_channel_outside_range();
+extern void test_engage_gate_true_when_all_three_conditions_met();
+extern void test_engage_drops_immediately_when_one_condition_flips_false();
+extern void test_zero_accel_is_pure_feedforward();
+extern void test_positive_error_adds_correction_negative_subtracts();
+extern void test_target_speed_clamps_to_max_and_min();
+extern void test_autothrottle_armed_when_channel_unassigned();
+extern void test_autothrottle_armed_when_assigned_channel_read_fails();
+extern void test_autothrottle_armed_only_within_threshold_range();
+
 int main(int argc, char **argv)
 {
     UNITY_BEGIN();
@@ -125,6 +150,29 @@ int main(int argc, char **argv)
     RUN_TEST(test_course_above_threshold_uses_live_ground_course);
     RUN_TEST(test_course_dropping_below_threshold_holds_last_valid_course);
     RUN_TEST(test_course_below_threshold_from_first_cycle_falls_back_to_reported_value);
+
+    RUN_TEST(test_axis_offset_no_channel_assigned_returns_configured_unchanged);
+    RUN_TEST(test_axis_offset_msp_read_failure_falls_back_to_configured);
+    RUN_TEST(test_axis_offset_center_maps_to_zero);
+    RUN_TEST(test_axis_offset_full_deflection_maps_to_plus_and_minus_gap);
+    RUN_TEST(test_axis_offset_out_of_range_us_clamps_to_nearest_endpoint);
+    RUN_TEST(test_prearm_candidate_computed_every_cycle_while_disarmed_with_axis_assigned);
+    RUN_TEST(test_prearm_forced_false_and_absent_while_armed_regardless_of_assignment);
+    RUN_TEST(test_prearm_failed_flag_is_not_sticky_across_arm_transition);
+    RUN_TEST(test_prearm_center_with_nonzero_default_fails_check);
+    RUN_TEST(test_prearm_matching_static_default_passes_check);
+
+    RUN_TEST(test_engage_gate_false_when_not_locked);
+    RUN_TEST(test_engage_gate_false_when_locked_but_not_airplane);
+    RUN_TEST(test_engage_gate_false_when_arm_channel_outside_range);
+    RUN_TEST(test_engage_gate_true_when_all_three_conditions_met);
+    RUN_TEST(test_engage_drops_immediately_when_one_condition_flips_false);
+    RUN_TEST(test_zero_accel_is_pure_feedforward);
+    RUN_TEST(test_positive_error_adds_correction_negative_subtracts);
+    RUN_TEST(test_target_speed_clamps_to_max_and_min);
+    RUN_TEST(test_autothrottle_armed_when_channel_unassigned);
+    RUN_TEST(test_autothrottle_armed_when_assigned_channel_read_fails);
+    RUN_TEST(test_autothrottle_armed_only_within_threshold_range);
 
     return UNITY_END();
 }

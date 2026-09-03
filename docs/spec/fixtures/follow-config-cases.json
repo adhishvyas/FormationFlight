@@ -1,0 +1,130 @@
+{
+  "_comment": "spec docs/spec/2026-09-03-FollowTestSuite.md §3.6/§4.15. Single source of truth for FollowManager::applyConfig() (C++), mock_server.py's validate_config() (Python), and html/follow-logic.js's validateConfig() (JS). `overrides` is applied on top of `baseline` below. cppValid/pythonValid/jsValid are independent per-validator expectations -- NOT one shared expectValid -- because tracing all three (while drafting this fixture) found the three validators don't actually implement the same rule set: §2.3's original 'Python mirrors only the C++ rules, JS is a strict superset' characterization undersells it. See each case's `note` for the specific divergence; summarized in docs/spec/2026-09-03-FollowTestSuite.md §7.",
+
+  "baseline": {
+    "ofsLongM": -15.0, "ofsLatM": 0.0, "ofsVertM": 10.0,
+    "targetPeer": 0, "emitHz": 4, "peerTimeoutMs": 1500,
+    "minSepM": 8.0, "minVSepM": 13.0, "maxTargetDistM": 50.0, "minAltM": 3.0,
+    "minCourseSpeed": 2.0,
+    "headingDeg": 0.0,
+    "statusGvarIndex": -1, "conditionFlagsGvarIndex": -1,
+    "rcLongChannel": -1, "rcLatChannel": -1, "rcVertChannel": -1,
+    "targetSpeedGvarIndex": -1, "autothrottleEngageGvarIndex": -1,
+    "autothrottleEnableRcChannel": -1,
+    "autothrottleEnableMinThresholdUs": 1700, "autothrottleEnableMaxThresholdUs": 2100,
+    "speedCorrectionAccelCmS2": 0, "minTargetSpeedMps": 5.0, "maxTargetSpeedMps": 30.0
+  },
+
+  "cases": [
+    {
+      "name": "baseline_is_valid",
+      "overrides": {},
+      "cppValid": true, "pythonValid": true, "jsValid": true
+    },
+
+    {
+      "name": "emitHz_zero_fails",
+      "overrides": { "emitHz": 0 },
+      "cppValid": false, "pythonValid": false, "jsValid": false,
+      "note": "shared rule -- all three implement this identically"
+    },
+    {
+      "name": "peerTimeoutMs_zero_fails",
+      "overrides": { "peerTimeoutMs": 0 },
+      "cppValid": false, "pythonValid": false, "jsValid": false,
+      "note": "shared rule"
+    },
+    {
+      "name": "minSepM_negative_fails",
+      "overrides": { "minSepM": -1 },
+      "cppValid": false, "pythonValid": false, "jsValid": false,
+      "note": "shared rule"
+    },
+    {
+      "name": "minVSepM_negative_fails",
+      "overrides": { "minVSepM": -1 },
+      "cppValid": false, "pythonValid": false, "jsValid": false,
+      "note": "shared rule"
+    },
+    {
+      "name": "minAltM_negative_fails",
+      "overrides": { "minAltM": -1 },
+      "cppValid": false, "pythonValid": false, "jsValid": false,
+      "note": "shared rule"
+    },
+    {
+      "name": "maxTargetDistM_zero_fails",
+      "overrides": { "maxTargetDistM": 0 },
+      "cppValid": false, "pythonValid": false, "jsValid": false,
+      "note": "shared rule"
+    },
+    {
+      "name": "minCourseSpeed_negative_fails",
+      "overrides": { "minCourseSpeed": -1 },
+      "cppValid": false, "pythonValid": false, "jsValid": false,
+      "note": "shared rule"
+    },
+
+    {
+      "name": "geometry_insane_fails_cpp_and_js_only",
+      "overrides": { "ofsLongM": -2, "ofsLatM": 0, "ofsVertM": 0 },
+      "cppValid": false, "pythonValid": true, "jsValid": false,
+      "note": "FINDING: mock_server.py's validate_config() has no offsetGeometrySane() equivalent at all -- it never checks ofsLongM/ofsLatM/ofsVertM against minSepM/minVSepM, so a geometrically-insane config passes Python validation. Not in spec's original §2.3 analysis."
+    },
+    {
+      "name": "target_peer_out_of_range_fails_cpp_only",
+      "overrides": { "targetPeer": 7 },
+      "cppValid": false, "pythonValid": true, "jsValid": true,
+      "note": "FINDING: neither mock_server.py nor follow.js check targetPeer against NODES_MAX -- only FollowManager::applyConfig() does. Not in spec's original §2.3 analysis."
+    },
+    {
+      "name": "status_gvar_index_out_of_range_fails_cpp_and_python_only",
+      "overrides": { "statusGvarIndex": 8 },
+      "cppValid": false, "pythonValid": false, "jsValid": true,
+      "note": "FINDING: follow.js's validateConfig() never range-checks any GVAR index field (-1 or 0-7) -- it only checks GVAR-index *uniqueness* (see gvar_indices_not_unique_fails below), not individual validity. C++ and Python both enforce the range."
+    },
+    {
+      "name": "rc_long_channel_out_of_range_fails_cpp_and_python_only",
+      "overrides": { "rcLongChannel": 17 },
+      "cppValid": false, "pythonValid": false, "jsValid": true,
+      "note": "FINDING: follow.js never range-checks RC channel fields (-1 or 1-16) -- only channel *uniqueness* (see rc_channels_not_unique_fails below). C++ and Python both enforce the range."
+    },
+    {
+      "name": "max_target_speed_not_greater_than_min_fails_cpp_and_python_only",
+      "overrides": { "minTargetSpeedMps": 10, "maxTargetSpeedMps": 10 },
+      "cppValid": false, "pythonValid": false, "jsValid": true,
+      "note": "FINDING: follow.js never checks maxTargetSpeedMps > minTargetSpeedMps >= 0 at all (only the autothrottle arm-switch threshold ordering, a different field pair -- see autothrottle_threshold_order_fails below)."
+    },
+    {
+      "name": "speed_correction_accel_negative_fails_cpp_and_python_only",
+      "overrides": { "speedCorrectionAccelCmS2": -1 },
+      "cppValid": false, "pythonValid": false, "jsValid": true,
+      "note": "FINDING: follow.js never checks speedCorrectionAccelCmS2 >= 0."
+    },
+
+    {
+      "name": "gvar_indices_not_unique_fails_js_only",
+      "overrides": { "statusGvarIndex": 1, "conditionFlagsGvarIndex": 1 },
+      "cppValid": true, "pythonValid": true, "jsValid": false,
+      "note": "JS-only superset rule (spec §2.3, documented finding §7.1): a raw POST bypassing the UI can set overlapping GVAR indices and the firmware accepts it."
+    },
+    {
+      "name": "rc_channels_not_unique_fails_js_only",
+      "overrides": { "rcLongChannel": 5, "rcLatChannel": 5 },
+      "cppValid": true, "pythonValid": true, "jsValid": false,
+      "note": "JS-only superset rule (spec §2.3/§7.1)."
+    },
+    {
+      "name": "autothrottle_channel_overlaps_rc_axis_fails_js_only",
+      "overrides": { "rcLongChannel": 5, "autothrottleEnableRcChannel": 5 },
+      "cppValid": true, "pythonValid": true, "jsValid": false,
+      "note": "JS-only superset rule (spec §2.3/§7.1)."
+    },
+    {
+      "name": "autothrottle_threshold_order_fails_js_only",
+      "overrides": { "autothrottleEnableMinThresholdUs": 2100, "autothrottleEnableMaxThresholdUs": 1700 },
+      "cppValid": true, "pythonValid": true, "jsValid": false,
+      "note": "JS-only superset rule, deliberately not duplicated server-side per mock_server.py's own comment (spec §2.3)."
+    }
+  ]
+}

@@ -38,6 +38,37 @@ extern void test_layer2_allows_sign_flip_when_other_axes_above_minSepM();
 extern void test_zero_on_candidate_side_never_counts_as_crossed();
 extern void test_zero_on_reference_side_never_counts_as_crossed();
 
+// test_peer_lock.cpp (spec §4.1)
+extern void test_fresh_manager_stays_acquiring_with_no_peers();
+extern void test_fresh_manager_locks_within_one_cycle_once_peer_exists();
+extern void test_target_peer_zero_locks_first_active_in_iteration_order();
+extern void test_target_peer_pinned_ignores_other_live_peers();
+extern void test_locked_peer_going_stale_enters_locked_holding_and_keeps_id();
+extern void test_locked_holding_peer_returning_with_same_name_relocks();
+extern void test_locked_holding_id_reused_by_different_aircraft_does_not_relock();
+extern void test_gate_inactive_mid_lock_forces_idle_and_clears_lock();
+extern void test_applyConfig_target_peer_change_forces_reacquire_mid_lock();
+
+// test_altitude_floor.cpp (spec §4.4/§4.12)
+extern void test_altitude_above_floor_is_not_clamped();
+extern void test_altitude_below_floor_is_clamped_but_still_emitted();
+extern void test_floor_clamp_not_attributable_to_rc_reports_floor_clamped_condition();
+extern void test_floor_clamp_attributable_to_rc_reports_rc_invalid_gap_condition();
+extern void test_target_within_max_dist_is_emitted_normally();
+extern void test_target_beyond_max_dist_suppresses_waypoint_but_keeps_lock();
+
+// test_heading_and_course.cpp (spec §4.5/§4.6)
+extern void test_heading_off_never_sends_set_head_even_with_heading_hold_active();
+extern void test_heading_course_returns_course_deg_wrapped();
+extern void test_heading_fixed_ignores_course_deg();
+extern void test_heading_course_relative_adds_offset_and_wraps();
+extern void test_heading_point_leader_bears_toward_peer_position();
+extern void test_heading_zero_collision_remaps_to_one();
+extern void test_nonzero_heading_skips_send_set_head_when_heading_hold_inactive();
+extern void test_course_above_threshold_uses_live_ground_course();
+extern void test_course_dropping_below_threshold_holds_last_valid_course();
+extern void test_course_below_threshold_from_first_cycle_falls_back_to_reported_value();
+
 int main(int argc, char **argv)
 {
     UNITY_BEGIN();
@@ -66,6 +97,34 @@ int main(int argc, char **argv)
     RUN_TEST(test_layer2_allows_sign_flip_when_other_axes_above_minSepM);
     RUN_TEST(test_zero_on_candidate_side_never_counts_as_crossed);
     RUN_TEST(test_zero_on_reference_side_never_counts_as_crossed);
+
+    RUN_TEST(test_fresh_manager_stays_acquiring_with_no_peers);
+    RUN_TEST(test_fresh_manager_locks_within_one_cycle_once_peer_exists);
+    RUN_TEST(test_target_peer_zero_locks_first_active_in_iteration_order);
+    RUN_TEST(test_target_peer_pinned_ignores_other_live_peers);
+    RUN_TEST(test_locked_peer_going_stale_enters_locked_holding_and_keeps_id);
+    RUN_TEST(test_locked_holding_peer_returning_with_same_name_relocks);
+    RUN_TEST(test_locked_holding_id_reused_by_different_aircraft_does_not_relock);
+    RUN_TEST(test_gate_inactive_mid_lock_forces_idle_and_clears_lock);
+    RUN_TEST(test_applyConfig_target_peer_change_forces_reacquire_mid_lock);
+
+    RUN_TEST(test_altitude_above_floor_is_not_clamped);
+    RUN_TEST(test_altitude_below_floor_is_clamped_but_still_emitted);
+    RUN_TEST(test_floor_clamp_not_attributable_to_rc_reports_floor_clamped_condition);
+    RUN_TEST(test_floor_clamp_attributable_to_rc_reports_rc_invalid_gap_condition);
+    RUN_TEST(test_target_within_max_dist_is_emitted_normally);
+    RUN_TEST(test_target_beyond_max_dist_suppresses_waypoint_but_keeps_lock);
+
+    RUN_TEST(test_heading_off_never_sends_set_head_even_with_heading_hold_active);
+    RUN_TEST(test_heading_course_returns_course_deg_wrapped);
+    RUN_TEST(test_heading_fixed_ignores_course_deg);
+    RUN_TEST(test_heading_course_relative_adds_offset_and_wraps);
+    RUN_TEST(test_heading_point_leader_bears_toward_peer_position);
+    RUN_TEST(test_heading_zero_collision_remaps_to_one);
+    RUN_TEST(test_nonzero_heading_skips_send_set_head_when_heading_hold_inactive);
+    RUN_TEST(test_course_above_threshold_uses_live_ground_course);
+    RUN_TEST(test_course_dropping_below_threshold_holds_last_valid_course);
+    RUN_TEST(test_course_below_threshold_from_first_cycle_falls_back_to_reported_value);
 
     return UNITY_END();
 }

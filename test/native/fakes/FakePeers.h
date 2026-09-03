@@ -21,7 +21,8 @@ public:
     // FollowManager.h's slotToLatLon() comment for why that's not x1e7 --
     // cm/s speed, degrees x10 course).
     void setPeer(uint8_t index, uint8_t id, double lat, double lon,
-                 double groundSpeedMs, double groundCourseDeg, int16_t relalt = 0)
+                 double groundSpeedMs, double groundCourseDeg, int16_t relalt = 0,
+                 const char *name = "PR")
     {
         peer_t &p = table[index];
         p = peer_t{};
@@ -29,7 +30,7 @@ public:
         p.lost = 0;
         p.updated = millis();
         p.relalt = relalt;
-        strncpy(p.name, "PR", sizeof(p.name) - 1);
+        strncpy(p.name, name, sizeof(p.name) - 1);
         p.gps.fixType = 2;
         p.gps.numSat = 10;
         p.gps.lat = (int32_t)lround(lat * 1e6);

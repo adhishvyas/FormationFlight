@@ -75,6 +75,8 @@ public:
     size_t length() const { return value.length(); }
     bool operator==(const String &other) const { return value == other.value; }
     bool operator==(const char *s) const { return value == s; }
+    String operator+(const char *s) const { String r; r.value = value + s; return r; }
+    String operator+(const String &other) const { String r; r.value = value + other.value; return r; }
 private:
     std::string value;
 };

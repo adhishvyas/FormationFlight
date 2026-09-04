@@ -253,15 +253,32 @@ int16_t FollowManager::resolveHeadingDeg(const peer_t *peer, double courseDeg) c
     return (int16_t)deg;
 }
 
+// x1e7 lat/lon (FollowTarget's representation) as a GNSSLocation -- shared
+// conversion used anywhere a solved target needs to go through IFollowGnss.
+static GNSSLocation toGnssLocation(int32_t lat_1e7, int32_t lon_1e7)
+{
+    GNSSLocation loc{};
+    loc.lat = (double)lat_1e7 / 1e7;
+    loc.lon = (double)lon_1e7 / 1e7;
+    return loc;
+}
+
+// Bearing+distance from the follower's own position to `loc`, decomposed
+// into a local north/east tangent-plane offset in meters -- shared by
+// resolveAlongTrackErrorM() (needs the along-track component) and
+// updateDebugGvars() (needs both components directly).
+static void horizontalOffsetM(IFollowGnss *gnss, GNSSLocation loc, double *northM, double *eastM)
+{
+    double distM = gnss->horizontalDistanceTo(loc);
+    double bearingRad = radians((double)gnss->courseTo(loc));
+    *northM = distM * cos(bearingRad);
+    *eastM = distM * sin(bearingRad);
+}
+
 double FollowManager::resolveAlongTrackErrorM(const FollowTarget &target, double courseDeg) const
 {
-    GNSSLocation targetLoc{};
-    targetLoc.lat = (double)target.lat_1e7 / 1e7;
-    targetLoc.lon = (double)target.lon_1e7 / 1e7;
-    double distM = gnss->horizontalDistanceTo(targetLoc);
-    double bearingRad = radians((double)gnss->courseTo(targetLoc));
-    double north_m = distM * cos(bearingRad);
-    double east_m  = distM * sin(bearingRad);
+    double north_m, east_m;
+    horizontalOffsetM(gnss, toGnssLocation(target.lat_1e7, target.lon_1e7), &north_m, &east_m);
     double th = radians(courseDeg);
     return north_m * cos(th) + east_m * sin(th); // spec §4.2
 }
@@ -478,10 +495,7 @@ FollowOffset FollowManager::resolveOffset()
 
 bool FollowManager::targetTooFar(const FollowTarget &target) const
 {
-    GNSSLocation targetLoc{};
-    targetLoc.lat = (double)target.lat_1e7 / 1e7;
-    targetLoc.lon = (double)target.lon_1e7 / 1e7;
-    double distFromSelf = gnss->horizontalDistanceTo(targetLoc);
+    double distFromSelf = gnss->horizontalDistanceTo(toGnssLocation(target.lat_1e7, target.lon_1e7));
     return distFromSelf > config.maxTargetDistM;
 }
 
@@ -496,6 +510,14 @@ void FollowManager::loop()
         return;
     }
     nextRunTime = millis() + (1000 / config.emitHz);
+
+    // Every early-exit path below reports the same way: no waypoint this
+    // cycle, so the autothrottle GVARs go to their disengaged state and the
+    // status GVARs report whatever condition code the caller determined.
+    auto bail = [&](FollowConditionCode code) {
+        updateStatusGvars(code);
+        updateAutothrottleGvars(false, 0);
+    };
 
     // spec §4.6: catch the common "RC disagrees with the static default's
     // sign" bootstrap trap (spec §10) while still on the ground, where the
@@ -531,16 +553,14 @@ void FollowManager::loop()
         lockedId = 0;
         lockedName[0] = '\0';
         haveValidCourse = false;
-        updateStatusGvars(rcPreArmCheckFailed ? FOLLOW_CONDITION_RC_INVALID_GAP_SETTINGS : FOLLOW_CONDITION_NONE);
-        updateAutothrottleGvars(false, 0);
+        bail(rcPreArmCheckFailed ? FOLLOW_CONDITION_RC_INVALID_GAP_SETTINGS : FOLLOW_CONDITION_NONE);
         return;
     }
 
     const peer_t *peer = resolveLock();
     if (peer == nullptr)
     {
-        updateStatusGvars(FOLLOW_CONDITION_NONE);
-        updateAutothrottleGvars(false, 0);
+        bail(FOLLOW_CONDITION_NONE);
         return; // ACQUIRING or LOCKED_HOLDING this cycle — nothing to emit
     }
 
@@ -609,16 +629,14 @@ void FollowManager::loop()
 
     if (!offsetGeometrySane(offset, config.minSepM, config.minVSepM, nullptr))
     {
-        updateStatusGvars(conditionCode);
-        updateAutothrottleGvars(false, 0);
+        bail(conditionCode);
         return;
     }
 
     if (targetTooFar(target))
     {
         raiseCondition(FOLLOW_CONDITION_TARGET_TOO_FAR);
-        updateStatusGvars(conditionCode);
-        updateAutothrottleGvars(false, 0);
+        bail(conditionCode);
         return;
     }
 
@@ -743,56 +761,44 @@ static int32_t statusGvarValue(FollowLockState state, uint8_t lockedId)
     }
 }
 
+// Shared "send only if changed or heartbeat-due" rule (spec §3.3), used by
+// every change+heartbeat GVAR below (status, condition flags, autothrottle
+// engage). gvarIndex < 0 means that slot is disabled -- a no-op, leaving
+// *lastSent at its INT32_MIN "never sent" sentinel so a later re-enable
+// still sends immediately rather than waiting on a stale heartbeat clock.
+static void sendGvarIfDue(IFollowMsp *msp, int16_t gvarIndex, int32_t value,
+                           int32_t *lastSent, unsigned long *lastSendMs, unsigned long now)
+{
+    if (gvarIndex < 0)
+    {
+        return;
+    }
+    bool due = *lastSent == INT32_MIN
+             || value != *lastSent
+             || (now - *lastSendMs) >= FOLLOW_GVAR_HEARTBEAT_MS;
+    if (due)
+    {
+        msp->sendGvar((uint8_t)gvarIndex, value);
+        *lastSent = value;
+        *lastSendMs = now;
+    }
+}
+
 void FollowManager::updateStatusGvars(FollowConditionCode conditionCode)
 {
     unsigned long now = millis();
-
-    if (config.statusGvarIndex >= 0)
-    {
-        int32_t value = statusGvarValue(state, lockedId);
-        bool due = lastSentStatusGvarValue == INT32_MIN
-                 || value != lastSentStatusGvarValue
-                 || (now - lastStatusGvarSendMs) >= FOLLOW_GVAR_HEARTBEAT_MS;
-        if (due)
-        {
-            msp->sendGvar((uint8_t)config.statusGvarIndex, value);
-            lastSentStatusGvarValue = value;
-            lastStatusGvarSendMs = now;
-        }
-    }
-
-    if (config.conditionFlagsGvarIndex >= 0)
-    {
-        int32_t value = conditionCode; // spec §5.3's 0-3 table, computed by callers now
-        bool due = lastSentConditionFlagsGvarValue == INT32_MIN
-                 || value != lastSentConditionFlagsGvarValue
-                 || (now - lastConditionFlagsGvarSendMs) >= FOLLOW_GVAR_HEARTBEAT_MS;
-        if (due)
-        {
-            msp->sendGvar((uint8_t)config.conditionFlagsGvarIndex, value);
-            lastSentConditionFlagsGvarValue = value;
-            lastConditionFlagsGvarSendMs = now;
-        }
-    }
+    sendGvarIfDue(msp, config.statusGvarIndex, statusGvarValue(state, lockedId),
+                  &lastSentStatusGvarValue, &lastStatusGvarSendMs, now);
+    // spec §5.3's 0-3 table, computed by callers now.
+    sendGvarIfDue(msp, config.conditionFlagsGvarIndex, conditionCode,
+                  &lastSentConditionFlagsGvarValue, &lastConditionFlagsGvarSendMs, now);
 }
 
 void FollowManager::updateAutothrottleGvars(bool engaged, int32_t targetSpeedCmS)
 {
     unsigned long now = millis();
-
-    if (config.autothrottleEngageGvarIndex >= 0)
-    {
-        int32_t value = engaged ? 1 : 0;
-        bool due = lastSentAutothrottleEngageValue == INT32_MIN
-                 || value != lastSentAutothrottleEngageValue
-                 || (now - lastAutothrottleEngageSendMs) >= FOLLOW_GVAR_HEARTBEAT_MS;
-        if (due)
-        {
-            msp->sendGvar((uint8_t)config.autothrottleEngageGvarIndex, value);
-            lastSentAutothrottleEngageValue = value;
-            lastAutothrottleEngageSendMs = now;
-        }
-    }
+    sendGvarIfDue(msp, config.autothrottleEngageGvarIndex, engaged ? 1 : 0,
+                  &lastSentAutothrottleEngageValue, &lastAutothrottleEngageSendMs, now);
     if (engaged && config.targetSpeedGvarIndex >= 0)
     {
         msp->sendGvar((uint8_t)config.targetSpeedGvarIndex, targetSpeedCmS);
@@ -813,13 +819,10 @@ void FollowManager::updateDebugGvars(int32_t lat_1e7, int32_t lon_1e7, int32_t a
     {
         return;
     }
-    GNSSLocation targetLoc{};
-    targetLoc.lat = (double)lat_1e7 / 1e7;
-    targetLoc.lon = (double)lon_1e7 / 1e7;
-    double distM = gnss->horizontalDistanceTo(targetLoc);
-    double bearingRad = radians((double)gnss->courseTo(targetLoc));
-    int32_t northOffsetCm = (int32_t)lround(distM * cos(bearingRad) * 100.0);
-    int32_t eastOffsetCm = (int32_t)lround(distM * sin(bearingRad) * 100.0);
+    double north_m, east_m;
+    horizontalOffsetM(gnss, toGnssLocation(lat_1e7, lon_1e7), &north_m, &east_m);
+    int32_t northOffsetCm = (int32_t)lround(north_m * 100.0);
+    int32_t eastOffsetCm = (int32_t)lround(east_m * 100.0);
 
     msp->sendGvar(FOLLOW_DEBUG_NORTH_GVAR_INDEX, northOffsetCm);
     msp->sendGvar(FOLLOW_DEBUG_EAST_GVAR_INDEX, eastOffsetCm);
@@ -850,46 +853,46 @@ static const char *triggerModeName(FollowTriggerMode m)
     }
 }
 
+// Single source of truth for which FollowRuntimeConfig fields configJson()/
+// toEepromRecord()/fromEepromRecord() carry, so adding a field means
+// touching this list once instead of three parallel, easy-to-desync
+// hand-written copies. Split in two because the EEPROM conversion needs to
+// know each field's direction of travel:
+//   DIRECT fields are the same type in FollowRuntimeConfig and
+//   FollowEepromRecord -- plain assignment both ways.
+//   ROUNDED fields are `double` in FollowRuntimeConfig, narrowed to
+//   int16_t in FollowEepromRecord -- lround() one way, exact widening back
+//   (see fromEepromRecord()'s comment).
+// headingMode is DIRECT for EEPROM purposes too, but configJson() reports it
+// as a name string rather than a raw value, so it -- like triggerMode
+// (compile-time only) and debug (RAM only, not in FollowEepromRecord at
+// all) -- is handled by hand in each function instead of going through
+// either list.
+#define FOLLOW_CONFIG_DIRECT_FIELDS(X) \
+    X(targetPeer) X(emitHz) X(peerTimeoutMs) \
+    X(statusGvarIndex) X(conditionFlagsGvarIndex) \
+    X(rcLongChannel) X(rcLatChannel) X(rcVertChannel) \
+    X(targetSpeedGvarIndex) X(autothrottleEngageGvarIndex) \
+    X(autothrottleEnableRcChannel) X(autothrottleEnableMinThresholdUs) \
+    X(autothrottleEnableMaxThresholdUs) X(speedCorrectionAccelCmS2)
+#define FOLLOW_CONFIG_ROUNDED_FIELDS(X) \
+    X(ofsLongM) X(ofsLatM) X(ofsVertM) \
+    X(minSepM) X(minVSepM) X(maxTargetDistM) X(minAltM) \
+    X(minCourseSpeed) X(headingDeg) \
+    X(minTargetSpeedMps) X(maxTargetSpeedMps)
+
 void FollowManager::configJson(JsonDocument *doc) const
 {
-    (*doc)["ofsLongM"] = config.ofsLongM;
-    (*doc)["ofsLatM"] = config.ofsLatM;
-    (*doc)["ofsVertM"] = config.ofsVertM;
+#define JSON_FIELD(field) (*doc)[#field] = config.field;
+    FOLLOW_CONFIG_DIRECT_FIELDS(JSON_FIELD)
+    FOLLOW_CONFIG_ROUNDED_FIELDS(JSON_FIELD)
+#undef JSON_FIELD
 
     // Trigger mode is compile-time-only until Phase 2b (AUX) lands — report
     // it read-only rather than accepting it via applyConfig() (spec plan's
     // Phase 3 notes).
     (*doc)["triggerMode"] = triggerModeName((FollowTriggerMode)FOLLOW_TRIGGER_MODE);
-
-    (*doc)["targetPeer"] = config.targetPeer;
-    (*doc)["emitHz"] = config.emitHz;
-    (*doc)["peerTimeoutMs"] = config.peerTimeoutMs;
-
-    (*doc)["minSepM"] = config.minSepM;
-    (*doc)["minVSepM"] = config.minVSepM;
-    (*doc)["maxTargetDistM"] = config.maxTargetDistM;
-    (*doc)["minAltM"] = config.minAltM;
-
-    (*doc)["minCourseSpeed"] = config.minCourseSpeed;
-
     (*doc)["headingMode"] = headingModeName(config.headingMode);
-    (*doc)["headingDeg"] = config.headingDeg;
-
-    (*doc)["statusGvarIndex"] = config.statusGvarIndex;
-    (*doc)["conditionFlagsGvarIndex"] = config.conditionFlagsGvarIndex;
-
-    (*doc)["rcLongChannel"] = config.rcLongChannel;
-    (*doc)["rcLatChannel"] = config.rcLatChannel;
-    (*doc)["rcVertChannel"] = config.rcVertChannel;
-
-    (*doc)["targetSpeedGvarIndex"] = config.targetSpeedGvarIndex;
-    (*doc)["autothrottleEngageGvarIndex"] = config.autothrottleEngageGvarIndex;
-    (*doc)["autothrottleEnableRcChannel"] = config.autothrottleEnableRcChannel;
-    (*doc)["autothrottleEnableMinThresholdUs"] = config.autothrottleEnableMinThresholdUs;
-    (*doc)["autothrottleEnableMaxThresholdUs"] = config.autothrottleEnableMaxThresholdUs;
-    (*doc)["speedCorrectionAccelCmS2"] = config.speedCorrectionAccelCmS2;
-    (*doc)["minTargetSpeedMps"] = config.minTargetSpeedMps;
-    (*doc)["maxTargetSpeedMps"] = config.maxTargetSpeedMps;
 
     // RAM only (spec: FollowConfig.h's FOLLOW_DEBUG_ENABLED comment) — not
     // in FollowEepromRecord, so this always reports false again after a
@@ -1021,39 +1024,13 @@ static FollowEepromRecord toEepromRecord(const FollowRuntimeConfig &config)
     FollowEepromRecord record{};
     record.version = FOLLOW_EEPROM_VERSION;
 
-    record.ofsLongM = (int16_t)lround(config.ofsLongM);
-    record.ofsLatM = (int16_t)lround(config.ofsLatM);
-    record.ofsVertM = (int16_t)lround(config.ofsVertM);
-
-    record.targetPeer = config.targetPeer;
-    record.emitHz = config.emitHz;
-    record.peerTimeoutMs = config.peerTimeoutMs;
-
-    record.minSepM = (int16_t)lround(config.minSepM);
-    record.minVSepM = (int16_t)lround(config.minVSepM);
-    record.maxTargetDistM = (int16_t)lround(config.maxTargetDistM);
-    record.minAltM = (int16_t)lround(config.minAltM);
-
-    record.minCourseSpeed = (int16_t)lround(config.minCourseSpeed);
-
+#define COPY_DIRECT(field) record.field = config.field;
+    FOLLOW_CONFIG_DIRECT_FIELDS(COPY_DIRECT)
+#undef COPY_DIRECT
+#define COPY_ROUNDED(field) record.field = (int16_t)lround(config.field);
+    FOLLOW_CONFIG_ROUNDED_FIELDS(COPY_ROUNDED)
+#undef COPY_ROUNDED
     record.headingMode = config.headingMode;
-    record.headingDeg = (int16_t)lround(config.headingDeg);
-
-    record.statusGvarIndex = config.statusGvarIndex;
-    record.conditionFlagsGvarIndex = config.conditionFlagsGvarIndex;
-
-    record.rcLongChannel = config.rcLongChannel;
-    record.rcLatChannel = config.rcLatChannel;
-    record.rcVertChannel = config.rcVertChannel;
-
-    record.targetSpeedGvarIndex = config.targetSpeedGvarIndex;
-    record.autothrottleEngageGvarIndex = config.autothrottleEngageGvarIndex;
-    record.autothrottleEnableRcChannel = config.autothrottleEnableRcChannel;
-    record.autothrottleEnableMinThresholdUs = config.autothrottleEnableMinThresholdUs;
-    record.autothrottleEnableMaxThresholdUs = config.autothrottleEnableMaxThresholdUs;
-    record.speedCorrectionAccelCmS2 = config.speedCorrectionAccelCmS2;
-    record.minTargetSpeedMps = (int16_t)lround(config.minTargetSpeedMps);
-    record.maxTargetSpeedMps = (int16_t)lround(config.maxTargetSpeedMps);
 
     return record;
 }
@@ -1066,42 +1043,18 @@ static FollowRuntimeConfig fromEepromRecord(const FollowEepromRecord &record)
 {
     FollowRuntimeConfig config;
 
-    config.ofsLongM = record.ofsLongM;
-    config.ofsLatM = record.ofsLatM;
-    config.ofsVertM = record.ofsVertM;
-
-    config.targetPeer = record.targetPeer;
-    config.emitHz = record.emitHz;
-    config.peerTimeoutMs = record.peerTimeoutMs;
-
-    config.minSepM = record.minSepM;
-    config.minVSepM = record.minVSepM;
-    config.maxTargetDistM = record.maxTargetDistM;
-    config.minAltM = record.minAltM;
-
-    config.minCourseSpeed = record.minCourseSpeed;
-
+#define COPY_DIRECT(field) config.field = record.field;
+    FOLLOW_CONFIG_DIRECT_FIELDS(COPY_DIRECT)
+#undef COPY_DIRECT
+#define COPY_WIDEN(field) config.field = record.field;
+    FOLLOW_CONFIG_ROUNDED_FIELDS(COPY_WIDEN)
+#undef COPY_WIDEN
     config.headingMode = record.headingMode;
-    config.headingDeg = record.headingDeg;
-
-    config.statusGvarIndex = record.statusGvarIndex;
-    config.conditionFlagsGvarIndex = record.conditionFlagsGvarIndex;
-
-    config.rcLongChannel = record.rcLongChannel;
-    config.rcLatChannel = record.rcLatChannel;
-    config.rcVertChannel = record.rcVertChannel;
-
-    config.targetSpeedGvarIndex = record.targetSpeedGvarIndex;
-    config.autothrottleEngageGvarIndex = record.autothrottleEngageGvarIndex;
-    config.autothrottleEnableRcChannel = record.autothrottleEnableRcChannel;
-    config.autothrottleEnableMinThresholdUs = record.autothrottleEnableMinThresholdUs;
-    config.autothrottleEnableMaxThresholdUs = record.autothrottleEnableMaxThresholdUs;
-    config.speedCorrectionAccelCmS2 = record.speedCorrectionAccelCmS2;
-    config.minTargetSpeedMps = record.minTargetSpeedMps;
-    config.maxTargetSpeedMps = record.maxTargetSpeedMps;
 
     return config;
 }
+#undef FOLLOW_CONFIG_DIRECT_FIELDS
+#undef FOLLOW_CONFIG_ROUNDED_FIELDS
 
 void FollowManager::loadFromEEPROM()
 {

@@ -69,7 +69,7 @@ CONFIG = copy.deepcopy(DEFAULT_CONFIG)
 # InavPlatformType (src/lib/MSP/MSP.h): 0=multirotor, 1=airplane, ... Flip
 # here, or override per-request with ?platformType=N on GET
 # /followmanager/status, to exercise the autothrottle panel's platform gate
-# (spec §3.6) without a real FC — there's no real MSP connection in this mock.
+# without a real FC — there's no real MSP connection in this mock.
 MOCK_PLATFORM_TYPE = 1
 
 PEERS = [
@@ -246,7 +246,7 @@ def followmanager_status(query=None):
     # Mirrors FollowManager::autothrottleArmed()'s "no FC connected" fallback
     # (this mock has no real RC channel data to read) — always armed.
     doc["autothrottleArmed"] = True
-    # Mirrors FollowManager.cpp's airframe gate (spec §3.6) combined with the
+    # Mirrors FollowManager.cpp's airframe gate combined with the
     # arm switch above.
     autothrottle_engaged = platform_type == 1  # INAV_PLATFORM_AIRPLANE
     doc["autothrottleEngaged"] = autothrottle_engaged
@@ -267,10 +267,10 @@ def followmanager_status(query=None):
 
 
 # PeerManager.h's NODES_MAX (src/lib/Peers/PeerManager.h) — 0 = FIRST_ACTIVE,
-# 1-NODES_MAX pin to a specific peer id (spec §6.3).
+# 1-NODES_MAX pin to a specific peer id.
 NODES_MAX = 6
 
-# FollowManager.cpp's offsetGeometrySane() (spec §7.4), used by both loop()
+# FollowManager.cpp's offsetGeometrySane(), used by both loop()
 # (runtime) and applyConfig() (config-validation time) on the firmware side —
 # mirrored here so a geometrically-insane static offset is rejected the same
 # way in the mock as on real firmware.
@@ -330,7 +330,7 @@ def validate_config(cfg):
     if cfg.get("speedCorrectionAccelCmS2", 0) < 0:
         return "speedCorrectionAccelCmS2 must be >= 0"
 
-    # Spec §7.4 geometry rules, mirroring FollowManager.cpp's
+    # Offset geometry rules, mirroring FollowManager.cpp's
     # offsetGeometrySane() so a config accepted here can't be geometrically
     # insane (minimum 3D separation, minimum vertical gap when stacked).
     long_m = cfg.get("ofsLongM", 0.0)
@@ -340,10 +340,10 @@ def validate_config(cfg):
     mag3d = math.sqrt(horizontal_mag * horizontal_mag + vert_m * vert_m)
     min_sep_m = cfg.get("minSepM", 0.0)
     if mag3d < min_sep_m:
-        return "slot magnitude is below minSepM (spec §7.4 minimum 3D separation)"
+        return "slot magnitude is below minSepM (minimum 3D separation)"
     min_vsep_m = cfg.get("minVSepM", 0.0)
     if horizontal_mag < STACKED_HORIZONTAL_EPSILON_M and abs(vert_m) < min_vsep_m:
-        return "stacked slot's vertical offset is below minVSepM (spec §7.4)"
+        return "stacked slot's vertical offset is below minVSepM"
 
     return None
 

@@ -82,9 +82,8 @@ jobs:
         path: ~/artifacts/**
       continue-on-error: true
 
-  # Follow test suite (spec docs/spec/2026-09-03-FollowTestSuite.md §6
-  # Phase 5) -- off-hardware, additive alongside the per-target firmware
-  # build matrix above, not a replacement for it.
+  # Follow test suite -- off-hardware, additive alongside the per-target
+  # firmware build matrix above, not a replacement for it.
   test-native:
     runs-on: ubuntu-latest
     steps:
@@ -132,10 +131,10 @@ jobs:
     - name: Run follow-logic.js tests
       run: node --test test/follow-logic.test.js
 
-  # Not called out by name in Phase 5's rollout text (only native + Node
-  # are), but test_mock_server.py is the third leg of the §4.15
-  # cross-mirror fixture -- leaving it out of CI would let it silently
-  # drift the same way the fixture itself exists to prevent.
+  # test_mock_server.py is the third leg of the cross-mirror fixture
+  # (alongside test-native and test-follow-logic-js above) -- leaving it out
+  # of CI would let it silently drift the same way the fixture itself
+  # exists to prevent.
   test-mock-server-py:
     runs-on: ubuntu-latest
     steps:

@@ -1,7 +1,6 @@
-// spec docs/spec/2026-09-03-FollowTestSuite.md §4.11 -- status/condition
-// GVAR reporting (OsdGvar spec §3.3, updateStatusGvars()/
+// Status/condition GVAR reporting: updateStatusGvars()/
 // updateAutothrottleGvars()'s change+heartbeat send rule and
-// raiseCondition()'s priority ordering).
+// raiseCondition()'s priority ordering.
 
 #include <unity.h>
 

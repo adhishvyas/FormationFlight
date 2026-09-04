@@ -1,19 +1,18 @@
 'use strict';
 
-// Pure logic extracted from follow.js (spec
-// docs/spec/2026-09-03-FollowTestSuite.md §3.5) -- no DOM/Preact
+// Pure logic extracted from follow.js -- no DOM/Preact
 // dependency, so this module is importable both by follow.js (the UI) and
 // by a plain Node test (test/follow-logic.test.js), run with
 // `node --test`, no build step, no new dependency.
 
 // Mirrors FollowManager::applyConfig()'s stacked-slot epsilon
 // (src/lib/Follow/FollowManager.cpp) so client-side validation agrees with
-// the server-side check for the same config (spec §7.4 — both must exist,
-// client-side isn't a substitute for server-side).
+// the server-side check for the same config — both must exist,
+// client-side isn't a substitute for server-side.
 export const STACKED_HORIZONTAL_EPSILON_M = 0.5;
 
 // Mirrors PeerManager.h's NODES_MAX (src/lib/Peers/PeerManager.h) — 0 =
-// FIRST_ACTIVE, 1-NODES_MAX pin to a specific peer id (spec §6.3).
+// FIRST_ACTIVE, 1-NODES_MAX pin to a specific peer id.
 const NODES_MAX = 6;
 // Mirrors MSP.h's MSP_MAX_SUPPORTED_CHANNELS (src/lib/MSP/MSP.h).
 const MSP_MAX_SUPPORTED_CHANNELS = 16;
@@ -21,7 +20,7 @@ const MSP_MAX_SUPPORTED_CHANNELS = 16;
 // The AHEAD/BEHIND/LEFT/RIGHT/ABOVE/BELOW "friendly grid" is purely a
 // client-side view over the canonical signed offset that's actually stored
 // (ofsLongM/ofsLatM/ofsVertM) — the server only ever sees that one
-// representation (spec §7.3).
+// representation.
 export function slotFromOffset(v, posLabel, negLabel, zeroLabel) {
   return v > 0 ? posLabel : v < 0 ? negLabel : zeroLabel;
 }
@@ -34,7 +33,7 @@ export function offsetFromSlot(slot, gapM, posLabel, negLabel) {
 }
 
 // Client-side mirror of FollowManager::applyConfig()'s validation
-// (spec §7.4 + basic field sanity). Blocks Save on failure; the server
+// (offset geometry rules + basic field sanity). Blocks Save on failure; the server
 // re-validates independently, so this is a UX nicety, not the guard.
 // Returns { section, message } (section names the panel that owns the
 // offending field, so the error can render next to the inputs it's about)
@@ -54,9 +53,9 @@ export function validateConfig(cfg) {
   const long = +cfg.ofsLongM, lat = +cfg.ofsLatM, vert = +cfg.ofsVertM;
   const horizontalMag = Math.sqrt(long * long + lat * lat);
   const mag3d = Math.sqrt(horizontalMag * horizontalMag + vert * vert);
-  if (mag3d < cfg.minSepM) return { section: 'bounds', message: 'Slot magnitude is below Min Separation (spec §7.4)' };
+  if (mag3d < cfg.minSepM) return { section: 'bounds', message: 'Slot magnitude is below Min Separation' };
   if (horizontalMag < STACKED_HORIZONTAL_EPSILON_M && Math.abs(vert) < cfg.minVSepM) {
-    return { section: 'bounds', message: 'Stacked slot\'s vertical offset is below Min Vertical Separation (spec §7.4)' };
+    return { section: 'bounds', message: 'Stacked slot\'s vertical offset is below Min Vertical Separation' };
   }
   const gvarFields = [
     ['statusGvarIndex', 'Status'], ['conditionFlagsGvarIndex', 'Condition Flags'],

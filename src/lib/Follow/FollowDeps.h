@@ -4,8 +4,7 @@
 #include "../Peers/PeerManager.h"
 
 // Thin seams over the three hardware-backed managers FollowManager reads
-// from and writes to (spec docs/spec/2026-09-03-FollowTestSuite.md §3.2).
-// FollowManager holds a pointer to each, injected via its constructor;
+// from and writes to. FollowManager holds a pointer to each, injected via its constructor;
 // production wiring (FollowProdAdapters.h/.cpp, used by getSingleton())
 // forwards to the real singletons, tests inject fakes instead. slotToLatLon()'s
 // use of GNSSManager::calculatePointAtDistance() and the free function

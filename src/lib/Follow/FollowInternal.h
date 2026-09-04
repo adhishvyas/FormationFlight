@@ -2,14 +2,13 @@
 
 #include "FollowManager.h"
 
-// Free functions private to FollowManager.cpp's implementation (spec
-// docs/spec/2026-09-03-FollowTestSuite.md §2.2/§4.14 calls them "genuinely
-// pure... need no seam at all"). That's true of their logic, but not quite
-// of their linkage: they were `static` (internal linkage), so a separate
-// test translation unit couldn't call them at all. Promoted from `static`
-// to ordinary external linkage and declared here purely so the native test
-// suite can call them directly -- FollowManager.cpp is still the only
-// production caller, and this is not part of FollowManager's public API.
+// Free functions private to FollowManager.cpp's implementation. They are
+// pure (no dependency on FollowManager's internal state) so they need no
+// mock/fake seam of their own -- but pure logic still needs external
+// linkage to be callable from a separate test translation unit, so they're
+// declared here (rather than kept `static` inside the .cpp) purely so the
+// native test suite can call them directly. FollowManager.cpp is still the
+// only production caller, and this is not part of FollowManager's public API.
 
 bool offsetGeometrySane(const FollowOffset &offset, double minSepM, double minVSepM, String *errMsg);
 

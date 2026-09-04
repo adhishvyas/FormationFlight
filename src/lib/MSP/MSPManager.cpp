@@ -128,10 +128,10 @@ MSPHost MSPManager::getFCVariant()
 // once we have a valid response. Unlike getFCVariant(), this has no
 // sys.phase-based give-up: its only caller (FollowManager::loop()) never
 // runs until sys.phase > MODE_OTA_SYNC, so a "stop trying past MODE_HOST_SCAN"
-// bypass would fire on the very first call, before a request is ever sent —
-// which is exactly what used to happen here. Returns INAV_PLATFORM_UNKNOWN
-// until a reply actually lands, so "never answered" is distinguishable from
-// a real INAV_PLATFORM_MULTIROTOR (0) reply.
+// bypass would fire on the very first call, before a request is ever sent,
+// and platformType would stay stuck at INAV_PLATFORM_UNKNOWN forever.
+// Returns INAV_PLATFORM_UNKNOWN until a reply actually lands, so "never
+// answered" is distinguishable from a real INAV_PLATFORM_MULTIROTOR (0) reply.
 InavPlatformType MSPManager::getPlatformType()
 {
     static msp_mixer_config_t mixer{.platformType = INAV_PLATFORM_UNKNOWN};
@@ -219,14 +219,14 @@ int32_t MSPManager::local_altitude_cm()
 }
 
 // Cached MSP_RC poll (~100ms, matching local_altitude_cm()'s cadence) so
-// FollowManager::loop() at FOLLOW_EMIT_HZ always sees a fresh-enough read
-// (spec §3.3). Deliberately does NOT memset-on-failure the way
-// local_altitude_cm()/getAnalogValues() do (see this plan's corrections
-// note #2) — a dropped MSP_RC frame must not read as "channel near zero,"
-// so a failed request just leaves the last successfully parsed struct in
-// place. Polling only ever happens because a caller asked for a specific
-// channel, so a pilot with no axis RC-assigned costs zero extra MSP
-// traffic (spec §3.3) without this function needing its own enable flag.
+// FollowManager::loop() at FOLLOW_EMIT_HZ always sees a fresh-enough read.
+// Deliberately does NOT memset-on-failure the way
+// local_altitude_cm()/getAnalogValues() do — a dropped MSP_RC frame must
+// not read as "channel near zero," so a failed request just leaves the
+// last successfully parsed struct in place. Polling only ever happens
+// because a caller asked for a specific channel, so a pilot with no axis
+// RC-assigned costs zero extra MSP traffic without this function needing
+// its own enable flag.
 bool MSPManager::getRcChannelUs(uint8_t channel1Based, uint16_t *outUs)
 {
     static msp_rc_t rc = {};
@@ -352,7 +352,7 @@ void MSPManager::sendRadar(const peer_t *peer)
 
 // MSP_SET_WP (#209) - INAV follow-me special waypoint #255.
 // Requires NAV POSHOLD + GCS NAV active on the follower FC.
-// p1 doubles as heading for this special waypoint only (spec §7.7) - for
+// p1 doubles as heading for this special waypoint only - for
 // ordinary mission waypoints (1-60) it means cruise speed instead; the two
 // are not the same field just because they share a byte offset.
 // NOTE: as of INAV 9.x, the heading is currently inert for a follower in NAV
@@ -376,7 +376,7 @@ void MSPManager::sendFollowWaypoint(int32_t lat_1e7, int32_t lon_1e7, int32_t al
     msp->command(MSP_SET_WP, &wp, sizeof(wp));
 }
 
-// MSP_SET_HEAD (#211) - explicit heading-hold target (spec §7.7 follow-up).
+// MSP_SET_HEAD (#211) - explicit heading-hold target.
 // One-way, best-effort, no ACK wait, mirrors sendGvar()'s fire-and-forget
 // style. Callers must gate on isHeadingHoldActive() themselves — INAV
 // accepts this unconditionally but the yaw-rate PID only consumes the target
@@ -396,7 +396,7 @@ void MSPManager::sendGvar(uint8_t index, int32_t value)
     }
     // getFCVersion() is already cached for the connection's lifetime
     // (used today by Display.cpp's FC-version readout) — this adds no
-    // extra MSP traffic to check support (spec §2.2 Option A).
+    // extra MSP traffic to check support.
     if (getFCVersion().versionMajor < 9)
     {
         return;
@@ -419,11 +419,6 @@ void MSPManager::loop()
 {
     if (sys.phase > MODE_OTA_SYNC && millis() >= nextSendTime)
     {
-        if (hostIsFlightController(getFCVariant()))
-        {
-            // We used to get state & analog values here; necessary?
-        }
-
         // Send MSP radar positions to the FC
         StatsManager::getSingleton()->startTimer();
 

@@ -4,12 +4,11 @@
 #include <array>
 #include <cmath>
 
-// Test double for IFollowPeers (spec docs/spec/2026-09-03-FollowTestSuite.md
-// §3.3). Mirrors the real PeerManager's id<->index convention exactly
-// (PeerManager.cpp's getPeerById()/getPeer()): table is indexed 0..NODES_MAX-1,
-// getPeerById(id) looks up table[id - 1], and an unset slot's id is 0 --
-// so §4.1's "First Active" scan (skip id==0, first non-stale wins) behaves
-// identically against real and fake.
+// Test double for IFollowPeers. Mirrors the real PeerManager's id<->index
+// convention exactly (PeerManager.cpp's getPeerById()/getPeer()): table is
+// indexed 0..NODES_MAX-1, getPeerById(id) looks up table[id - 1], and an
+// unset slot's id is 0 -- so the "First Active" scan (skip id==0, first
+// non-stale wins) behaves identically against real and fake.
 class FakePeers : public IFollowPeers {
 public:
     std::array<peer_t, NODES_MAX> table{};

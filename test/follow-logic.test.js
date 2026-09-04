@@ -1,6 +1,5 @@
-// spec docs/spec/2026-09-03-FollowTestSuite.md §3.5/§4.15/§4.16 -- Node
-// test for html/follow-logic.js's pure functions. No build step, no new
-// npm dependency: node:test + node:assert, run with `node --test`.
+// Node test for html/follow-logic.js's pure functions. No build step, no
+// new npm dependency: node:test + node:assert, run with `node --test`.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -14,10 +13,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const fixturePath = path.join(__dirname, '..', 'docs', 'spec', 'fixtures', 'follow-config-cases.json');
 const fixture = JSON.parse(readFileSync(fixturePath, 'utf8'));
 
-// ---- §4.15 cross-mirror equivalence (JS side): every fixture case's
+// ---- Cross-mirror equivalence (JS side): every fixture case's
 // expectValid expectation, shared across all three validators. ----
 
-test('validateConfig() matches every fixture case (spec §4.15)', () => {
+test('validateConfig() matches every fixture case', () => {
   for (const tc of fixture.cases) {
     const cfg = { ...fixture.baseline, ...tc.overrides };
     const err = validateConfig(cfg);
@@ -26,7 +25,7 @@ test('validateConfig() matches every fixture case (spec §4.15)', () => {
   }
 });
 
-// ---- §4.16 slotFromOffset()/offsetFromSlot() round-trip, all three axes'
+// ---- slotFromOffset()/offsetFromSlot() round-trip, all three axes'
 // label pairs including the 0 -> CENTER/LEVEL case. ----
 
 const axisLabelPairs = [
@@ -55,7 +54,7 @@ test('offsetFromSlot() maps the zero label back to exactly 0', () => {
   assert.equal(offsetFromSlot('LEVEL', 10, 'ABOVE', 'BELOW'), 0);
 });
 
-// ---- §4.16 validateConfig()'s own rule set: the uniqueness/ordering rules
+// ---- validateConfig()'s own rule set: the uniqueness/ordering rules
 // also covered by the fixture loop above, asserted explicitly by name here
 // so a failure names the exact rule, not just "some fixture case". ----
 

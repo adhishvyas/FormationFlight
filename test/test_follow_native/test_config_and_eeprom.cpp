@@ -1,6 +1,5 @@
-// spec docs/spec/2026-09-03-FollowTestSuite.md §4.13 (applyConfig()
-// validation + EEPROM round-trip) and §4.14 (configJson()/statusJson()
-// REST contract shape).
+// applyConfig() validation + EEPROM round-trip, plus configJson()/
+// statusJson()'s REST contract shape.
 
 #include <unity.h>
 #include <cstring>
@@ -62,8 +61,9 @@ static const ConfigCase kConfigCases[] = {
     {"speedCorrectionAccelCmS2=0 passes", [](FollowRuntimeConfig &c) { c.speedCorrectionAccelCmS2 = 0; }, true},
     {"offset magnitude just under minSepM fails", [](FollowRuntimeConfig &c) { c.ofsLongM = -2; c.ofsLatM = 0; c.ofsVertM = 0; c.minSepM = 8; }, false},
     {"offset magnitude at minSepM passes", [](FollowRuntimeConfig &c) { c.ofsLongM = -8; c.ofsLatM = 0; c.ofsVertM = 0; c.minSepM = 8; }, true},
-    // spec docs/spec/2026-09-03-FollowTestSuite.md §2.3/§7.1 -- previously
-    // JS-only (html/follow-logic.js's validateConfig()), now enforced here too.
+    // These overlap/ordering checks are also enforced client-side in
+    // html/follow-logic.js's validateConfig(), so a raw POST bypassing the
+    // web UI still gets the same guarantee.
     {"statusGvarIndex==conditionFlagsGvarIndex fails", [](FollowRuntimeConfig &c) { c.statusGvarIndex = 1; c.conditionFlagsGvarIndex = 1; }, false},
     {"rcLongChannel==rcLatChannel fails", [](FollowRuntimeConfig &c) { c.rcLongChannel = 5; c.rcLatChannel = 5; }, false},
     {"autothrottleEnableRcChannel overlaps rc axis channel fails", [](FollowRuntimeConfig &c) { c.rcLongChannel = 5; c.autothrottleEnableRcChannel = 5; }, false},

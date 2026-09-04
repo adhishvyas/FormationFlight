@@ -1,5 +1,4 @@
-// spec docs/spec/2026-09-03-FollowTestSuite.md §3.6/§4.15 -- C++ side of
-// the cross-mirror fixture. Reads the same JSON fixture the Python
+// C++ side of the cross-mirror fixture. Reads the same JSON fixture the Python
 // (test_mock_server.py) and Node (test/follow-logic.test.js) tests read,
 // builds a FollowRuntimeConfig from each case, and checks
 // FollowManager::applyConfig()'s verdict against that case's expectValid.

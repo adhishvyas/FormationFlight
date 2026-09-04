@@ -1,9 +1,8 @@
-// spec docs/spec/2026-09-03-FollowTestSuite.md §4.10 -- speed autothrottle
-// (SpeedAutothrottle spec §3/§4). Driven through loop(); along-track error
-// is engineered precisely by placing the follower a known distance from the
+// Speed autothrottle. Driven through loop(); along-track error is
+// engineered precisely by placing the follower a known distance from the
 // *computed target* (not the peer) along the course axis, using the same
-// slotToLatLon()/calculatePointAtDistance() primitives Phase 2 already
-// verified independently.
+// slotToLatLon()/calculatePointAtDistance() primitives test_slot_geometry.cpp
+// already verified independently.
 
 #include <unity.h>
 

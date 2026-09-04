@@ -1,7 +1,6 @@
-// spec docs/spec/2026-09-03-FollowTestSuite.md §4.7 (RC axis mapping,
-// RcAxisControl spec §3, resolveAxisOffset()) and §4.9 (pre-arm check,
-// RcAxisControl spec §4.6). Both observed via loop()'s pre-arm candidate
-// exposure (statusJson()'s preArmCandidateOffset/rcPreArmCheckFailed),
+// RC axis mapping (resolveAxisOffset()) and the pre-arm check. Both
+// observed via loop()'s pre-arm candidate exposure (statusJson()'s
+// preArmCandidateOffset/rcPreArmCheckFailed),
 // which is read-only and gate/lock-independent -- no peer or active gate
 // needed, just msp->getState()==0 (disarmed) and an RC channel assigned.
 

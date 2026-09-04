@@ -194,13 +194,14 @@ WiFiManager::WiFiManager()
         serializeJson(doc, *response);
         request->send(response);
     });
-    // Phase 3B (in-memory only, no EEPROM — see Phase 4): accepts a subset
-    // of form params, applies them on top of the current config, validates
-    // the result (spec §7.4 + basic sanity) and rejects the whole update if
-    // it fails, rather than partially applying it.
+    // Live config update: applies to the in-memory config only, not EEPROM
+    // (see the /followmanager/commit handler below for that). Accepts a
+    // subset of form params, applies them on top of the current config,
+    // validates the result (offset geometry + basic field sanity) and
+    // rejects the whole update if it fails, rather than partially applying it.
     server->on("/followmanager/config", HTTP_POST, handleFollowManagerConfigPost);
-    // Phase 4C: explicit "flush the current in-memory config to EEPROM"
-    // action, distinct from 3B's live-edit POST above. Rate-limited inside
+    // Explicit "flush the current in-memory config to EEPROM" action,
+    // distinct from the live-edit POST above. Rate-limited inside
     // FollowManager::saveToEEPROM() so rapid/duplicate clicks don't hammer
     // EEPROM with writes.
     server->on("/followmanager/commit", HTTP_POST, [](AsyncWebServerRequest *request) {
@@ -311,8 +312,8 @@ void handleSystemStatus(AsyncWebServerRequest *request)
     request->send(response);
 }
 
-// Parses a subset of §9 keys from POST form params (Phase 3B), applies them
-// on top of the current in-memory FollowManager config, and asks
+// Parses a subset of FollowRuntimeConfig's fields from POST form params,
+// applies them on top of the current in-memory FollowManager config, and asks
 // FollowManager to validate+swap the result atomically. Any single
 // unrecognized enum value fails the whole request with 400 before anything
 // is applied, so a typo'd param can't silently leave other fields updated.
@@ -324,7 +325,7 @@ void handleFollowManagerConfigPost(AsyncWebServerRequest *request)
         return request->getParam(name, true)->value();
     };
 
-    // Canonical track-relative offset (spec §7.3) — the AHEAD/BEHIND/etc.
+    // Canonical track-relative offset — the AHEAD/BEHIND/etc.
     // "friendly grid" is a client-side view over these signed meters
     // (html/follow.js); the server only ever sees this one representation.
     if (request->hasParam("ofsLongM", true)) cfg.ofsLongM = strParam("ofsLongM").toDouble();
@@ -341,7 +342,7 @@ void handleFollowManagerConfigPost(AsyncWebServerRequest *request)
     if (request->hasParam("minAltM", true)) cfg.minAltM = strParam("minAltM").toDouble();
     if (request->hasParam("minCourseSpeed", true)) cfg.minCourseSpeed = strParam("minCourseSpeed").toDouble();
 
-    // Nose heading (spec §7.7) — headingDeg is shared between FIXED
+    // Nose heading — headingDeg is shared between FIXED
     // (absolute) and COURSE_RELATIVE (offset from course); which
     // interpretation applies depends solely on headingMode.
     if (request->hasParam("headingMode", true)) {
@@ -362,7 +363,7 @@ void handleFollowManagerConfigPost(AsyncWebServerRequest *request)
     if (request->hasParam("rcLatChannel", true)) cfg.rcLatChannel = (int16_t)strParam("rcLatChannel").toInt();
     if (request->hasParam("rcVertChannel", true)) cfg.rcVertChannel = (int16_t)strParam("rcVertChannel").toInt();
 
-    // Speed autothrottle (spec docs/spec/2026-08-28-FollowSpeedAutothrottle.md).
+    // Speed autothrottle.
     if (request->hasParam("targetSpeedGvarIndex", true)) cfg.targetSpeedGvarIndex = (int16_t)strParam("targetSpeedGvarIndex").toInt();
     if (request->hasParam("autothrottleEngageGvarIndex", true)) cfg.autothrottleEngageGvarIndex = (int16_t)strParam("autothrottleEngageGvarIndex").toInt();
     if (request->hasParam("autothrottleEnableRcChannel", true)) cfg.autothrottleEnableRcChannel = (int16_t)strParam("autothrottleEnableRcChannel").toInt();

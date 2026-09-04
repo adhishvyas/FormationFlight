@@ -1,5 +1,4 @@
-// spec docs/spec/2026-09-03-FollowTestSuite.md §4.2 -- slotToLatLon()'s
-// bearing/distance derivation (parent spec §7.1/§7.2). Pure, no fakes.
+// slotToLatLon()'s bearing/distance derivation. Pure, no fakes.
 //
 // Test functions are plain (non-static) so test_main.cpp (this suite's one
 // Unity entry point) can RUN_TEST() them by extern declaration -- see that
@@ -91,7 +90,7 @@ void test_ahead_bearing_wraps_near_360()
 // north_m/east_m the way slotToLatLon() itself does), and confirm feeding
 // that bearing/distance through calculatePointAtDistance() lands on the
 // exact same point slotToLatLon() produced. This checks slotToLatLon()'s
-// derivation, not calculatePointAtDistance() itself (spec §4.2). ----
+// derivation, not calculatePointAtDistance() itself. ----
 
 static void assertRoundTrips(double course_deg, double long_m, double lat_m)
 {

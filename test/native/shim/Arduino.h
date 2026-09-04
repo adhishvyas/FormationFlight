@@ -2,8 +2,7 @@
 
 // Minimal native-only stand-in for the Arduino core, sized to exactly what
 // src/lib/Follow/*, src/lib/Peers/PeerManager.h, src/lib/GNSS/GNSSManager.*,
-// and src/lib/MSP/MSP.h actually use (spec
-// docs/spec/2026-09-03-FollowTestSuite.md §3.1/§3.4). Resolved via this
+// and src/lib/MSP/MSP.h actually use. Resolved via this
 // env's -I test/native/shim, which is ordered ahead of any real Arduino.h on
 // the include path (there isn't one for platform=native) -- production
 // targets never see this file.
@@ -56,8 +55,7 @@ template <typename T> T max(T a, T b) { return a > b ? a : b; }
 
 // millis() is test-controllable (declared here, backed by a settable
 // counter defined in Arduino.cpp) so GVAR heartbeat / EEPROM rate-limit
-// tests (spec §4.11/§4.13) can drive time deterministically instead of
-// racing the wall clock.
+// tests can drive time deterministically instead of racing the wall clock.
 unsigned long millis();
 void native_millis_set(unsigned long ms);
 void native_millis_advance(unsigned long ms);

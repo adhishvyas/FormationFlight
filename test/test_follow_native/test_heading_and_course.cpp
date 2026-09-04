@@ -1,6 +1,5 @@
-// spec docs/spec/2026-09-03-FollowTestSuite.md §4.5 (heading modes, parent
-// spec §7.7, resolveHeadingDeg()) and §4.6 (course fallback, parent spec
-// §7.5, resolveCourseDeg()). Both private methods, driven through loop().
+// Heading modes (resolveHeadingDeg()) and course fallback
+// (resolveCourseDeg()). Both private methods, driven through loop().
 
 #include <unity.h>
 

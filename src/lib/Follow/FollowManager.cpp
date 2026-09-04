@@ -11,25 +11,25 @@
 // this region is always available once EEPROM.begin() has run.
 #define FOLLOW_EEPROM_OFFSET sizeof(cfg)
 
-// Minimum time between EEPROM commits (Phase 4B) — guards against a
+// Minimum time between EEPROM commits — guards against a
 // stuck/spammed "Save to EEPROM" button hammering flash with writes.
 #define FOLLOW_EEPROM_COMMIT_MIN_INTERVAL_MS 2000
 
 // Below this horizontal offset magnitude, a slot is considered "stacked"
 // (overhead/underneath) for the purposes of the minimum-vertical-separation
-// rule (spec §7.4).
+// rule.
 #define FOLLOW_STACKED_HORIZONTAL_EPSILON_M 0.5
 
-// Tolerance for §4.6's "RC candidate must reproduce the static default"
-// pre-arm rule, below — absorbs RC read quantization/jitter (frac steps in
-// 1/500 increments) without weakening the check into a sign-only match.
+// Tolerance for rcCandidateMatchesStaticDefault()'s "RC candidate must
+// reproduce the static default" pre-arm rule, below — absorbs RC read
+// quantization/jitter (frac steps in 1/500 increments) without weakening
+// the check into a sign-only match.
 #define FOLLOW_PREARM_MATCH_EPSILON_M 0.05
 
 // How often to resend a GVAR even if its value hasn't changed, so a
 // single dropped MSP write doesn't leave the OSD showing a stale state
-// indefinitely (spec §3.3). 20x less frequent than the default 4 Hz
-// waypoint stream — negligible added MSP traffic (spec §8's "don't flood
-// MSP" budget, referenced by §3.3).
+// indefinitely. 20x less frequent than the default 4 Hz
+// waypoint stream — negligible added MSP traffic.
 #define FOLLOW_GVAR_HEARTBEAT_MS 5000
 
 FollowTarget slotToLatLon(int32_t peer_lat_1e6, int32_t peer_lon_1e6, double course_deg,
@@ -75,7 +75,7 @@ FollowManager::FollowManager(IFollowMsp *msp, IFollowGnss *gnss, IFollowPeers *p
 // alongside the real adapters it wires FollowManager up to -- kept out of
 // this file so the native test env (which excludes FollowProdAdapters.cpp)
 // never needs to link the concrete MSPManager/GNSSManager/PeerManager
-// singletons (spec docs/spec/2026-09-03-FollowTestSuite.md §3.2).
+// singletons.
 
 bool FollowManager::followSwitchActive()
 {
@@ -85,8 +85,8 @@ bool FollowManager::followSwitchActive()
             return msp->isGCSNavActive();
         case FOLLOW_TRIGGER_AUX:
         default:
-            // AUX-channel trigger is a later phase (spec §5[C] option 1, not
-            // yet implemented) — never active rather than silently defaulting on.
+            // AUX-channel trigger is not yet implemented — never active
+            // rather than silently defaulting on.
             return false;
     }
 }
@@ -147,8 +147,8 @@ const peer_t *FollowManager::resolveLock()
     }
 
     // FOLLOW_LOCK_LOCKED_HOLDING: keep checking the same locked id for
-    // freshness every cycle, but never scan for or switch to another peer
-    // (spec §6.3 — no automatic failover).
+    // freshness every cycle, but never scan for or switch to another peer —
+    // no automatic failover.
     const peer_t *p = peers->getPeerById(lockedId);
     if (p != nullptr && !peer_is_stale(p, config.peerTimeoutMs))
     {
@@ -158,7 +158,7 @@ const peer_t *FollowManager::resolveLock()
             return p;
         }
         // The LoRa slot id was reassigned to a different aircraft while we
-        // were holding (spec §6.3 caveat). Treat as a lost lock: clear the
+        // were holding. Treat as a lost lock: clear the
         // id so this can never resume, rather than silently following a
         // new aircraft under the old id. Only a gate cycle (switch off/on)
         // can recover from here.
@@ -179,7 +179,7 @@ double FollowManager::resolveCourseDeg(const peer_t *peer)
     // peer->gps.groundSpeed is int16 cm/s; minCourseSpeed is human-facing
     // m/s. Convert at the comparison site — comparing the raw values
     // directly (e.g. "200 < 2") would almost never trip and would silently
-    // defeat this fallback (spec §7.5).
+    // defeat this fallback.
     int16_t minSpeedCmS = (int16_t)lround(config.minCourseSpeed * 100.0);
 
     if (peer->gps.groundSpeed >= minSpeedCmS)
@@ -211,8 +211,8 @@ int16_t FollowManager::resolveHeadingDeg(const peer_t *peer, double courseDeg) c
             break;
         case FOLLOW_HEADING_POINT_LEADER:
         {
-            // peer->gps.lat/lon are int32 x1e6 (spec §5[A] scaling note) —
-            // same conversion slotToLatLon() uses for the leader's own
+            // peer->gps.lat/lon are int32 x1e6 — same conversion
+            // slotToLatLon() uses for the leader's own
             // origin point.
             GNSSLocation leaderLoc{};
             leaderLoc.lat = (double)peer->gps.lat / 1e6;
@@ -280,7 +280,7 @@ double FollowManager::resolveAlongTrackErrorM(const FollowTarget &target, double
     double north_m, east_m;
     horizontalOffsetM(gnss, toGnssLocation(target.lat_1e7, target.lon_1e7), &north_m, &east_m);
     double th = radians(courseDeg);
-    return north_m * cos(th) + east_m * sin(th); // spec §4.2
+    return north_m * cos(th) + east_m * sin(th);
 }
 
 int32_t FollowManager::resolveTargetSpeedCmS(const peer_t *peer, const FollowTarget &target, double courseDeg) const
@@ -307,7 +307,7 @@ int32_t FollowManager::resolveTargetSpeedCmS(const peer_t *peer, const FollowTar
 }
 
 // Shared by loop() (runtime, has a live peer) and applyConfig() (server-side
-// §7.4 validation of a candidate config with no peer in scope yet) so both
+// validation of a candidate config with no peer in scope yet) so both
 // always agree on the same two geometry rules. Only the two checks that
 // depend purely on the configured offset — not on a live peer/target — live
 // here; targetTooFar()'s max-distance-from-self check has no equivalent at
@@ -318,29 +318,29 @@ bool offsetGeometrySane(const FollowOffset &offset, double minSepM, double minVS
                                  offset.lateral_m * offset.lateral_m);
     double mag3d = sqrt(horizontalMag * horizontalMag + offset.vertical_m * offset.vertical_m);
 
-    // Minimum 3D separation — forbids the degenerate collision slot (spec §7.4).
+    // Minimum 3D separation — forbids the degenerate collision slot.
     if (mag3d < minSepM)
     {
-        if (errMsg) *errMsg = "slot magnitude is below minSepM (spec §7.4 minimum 3D separation)";
+        if (errMsg) *errMsg = "slot magnitude is below minSepM (minimum 3D separation)";
         return false;
     }
     // Minimum vertical gap for stacked (overhead/underneath) slots — absorbs
-    // GPS vertical error, not just physical clearance (spec §7.4).
+    // GPS vertical error, not just physical clearance.
     if (horizontalMag < FOLLOW_STACKED_HORIZONTAL_EPSILON_M && fabs(offset.vertical_m) < minVSepM)
     {
-        if (errMsg) *errMsg = "stacked slot's vertical offset is below minVSepM (spec §7.4)";
+        if (errMsg) *errMsg = "stacked slot's vertical offset is below minVSepM";
         return false;
     }
     return true;
 }
 
-// Layer 2 of spec §4: true if `axis` crossing from `referenceAxis`'s sign
-// to `candidateAxis`'s sign is unsafe right now. Only a genuine sign flip
-// counts as "crossing" (spec §4.3 condition 1) — 0 on either side is the
+// Second safety layer for RC-scaled offsets: true if `axis` crossing from
+// `referenceAxis`'s sign to `candidateAxis`'s sign is unsafe right now. Only
+// a genuine sign flip counts as "crossing" — 0 on either side is the
 // boundary itself, not a side, so it never counts as a flip. `coMag` is
 // the *smaller* of the other two axes' combined magnitude at the
-// reference point and at the candidate point (spec §4.3's conservative
-// choice, covering two RC-assigned axes swinging in the same cycle).
+// reference point and at the candidate point — the conservative choice,
+// covering two RC-assigned axes swinging in the same cycle.
 bool axisSignLocked(double candidateAxis, double referenceAxis,
                             double candidateOther1, double candidateOther2,
                             double referenceOther1, double referenceOther2,
@@ -358,12 +358,12 @@ bool axisSignLocked(double candidateAxis, double referenceAxis,
     return coMag < minSepM;
 }
 
-// Both safety layers (spec §4.2 Layer 1, §4.3 Layer 2), evaluated
-// together so there's exactly one pass/fail test. Shared, read-only,
-// between resolveOffset() (which adopts `candidate` as the new
-// lastKnownGood on a pass) and the §4.6 pre-arm advisory check (which
-// never mutates state) — both callers must always agree on the same
-// answer for the same inputs.
+// Both safety layers (offsetGeometrySane()'s geometry check, then
+// axisSignLocked()'s sign-crossing check), evaluated together so there's
+// exactly one pass/fail test. Shared, read-only, between resolveOffset()
+// (which adopts `candidate` as the new lastKnownGood on a pass) and the
+// pre-arm advisory check (rcPreArmCheckFailed, which never mutates state)
+// — both callers must always agree on the same answer for the same inputs.
 bool candidateOffsetOk(const FollowOffset &candidate, const FollowOffset &reference,
                                double minSepM, double minVSepM)
 {
@@ -425,19 +425,19 @@ double FollowManager::resolveAxisOffset(double configuredM, int16_t channel1Base
 {
     if (channel1Based < 1)
     {
-        return configuredM; // no channel assigned (spec §3.2)
+        return configuredM; // no channel assigned
     }
 
     uint16_t us;
     if (!msp->getRcChannelUs((uint8_t)channel1Based, &us))
     {
-        return configuredM; // no FC connected, or channel1Based out of MSP_RC's range (spec §3.2)
+        return configuredM; // no FC connected, or channel1Based out of MSP_RC's range
     }
     // Whatever value comes back is mapped as-is, including below 1000us --
     // there is no separate "invalid reading" case once a channel is
-    // assigned (spec §3.2). The clamp below already guards over/under-
+    // assigned. The clamp below already guards over/under-
     // travel, so this also covers an unpopulated channel index (reads 0us
-    // from the cached msp_rc_t, spec §2.1) the same way: it resolves to
+    // from the cached msp_rc_t) the same way: it resolves to
     // -gap, not a fallback to configuredM.
 
     double gap = fabs(configuredM);
@@ -455,7 +455,7 @@ bool FollowManager::autothrottleArmed() const
 {
     if (config.autothrottleEnableRcChannel < 1)
     {
-        return true; // unassigned == always armed (spec §3.2)
+        return true; // unassigned == always armed
     }
     uint16_t us;
     if (!msp->getRcChannelUs((uint8_t)config.autothrottleEnableRcChannel, &us))
@@ -484,12 +484,11 @@ FollowOffset FollowManager::resolveOffset()
     {
         lastKnownGood = candidate;
     }
-    // On failure, lastKnownGood is left exactly as it was — the freeze
-    // (spec §4.4). When no axis has an RC channel assigned, `candidate`
-    // always equals lastKnownGood already (both are the static config,
-    // which applyConfig() guarantees is geometry-sane), so ok is always
-    // true and this is a no-op — today's plain static-offset behavior,
-    // unchanged.
+    // On failure, lastKnownGood is left exactly as it was — the freeze.
+    // When no axis has an RC channel assigned, `candidate` always equals
+    // lastKnownGood already (both are the static config, which
+    // applyConfig() guarantees is geometry-sane), so ok is always true and
+    // this is a no-op.
     return lastKnownGood;
 }
 
@@ -519,21 +518,19 @@ void FollowManager::loop()
         updateAutothrottleGvars(false, 0);
     };
 
-    // spec §4.6: catch the common "RC disagrees with the static default's
-    // sign" bootstrap trap (spec §10) while still on the ground, where the
-    // pilot can simply move the stick before it matters mid-flight. Runs
-    // independent of the follow gate/GCS NAV (spec §4.6 — the point is to
-    // catch this before the pilot ever reaches for the switch, not just
-    // while follow is inactive), gated only on arm state so it can't freeze
-    // stale if the gate goes active before the pilot arms. Reset to false
-    // every cycle the craft isn't disarmed-with-an-axis-assigned, so it
-    // never reports stale while armed (spec §7's gating for rcPreArmCheckFailed).
+    // Catch the common "RC disagrees with the static default's sign"
+    // bootstrap trap while still on the ground, where the pilot can simply
+    // move the stick before it matters mid-flight. Runs independent of the
+    // follow gate/GCS NAV — the point is to catch this before the pilot
+    // ever reaches for the switch, not just while follow is inactive —
+    // gated only on arm state so it can't freeze stale if the gate goes
+    // active before the pilot arms. Reset to false every cycle the craft
+    // isn't disarmed-with-an-axis-assigned, so it never reports stale while armed.
     rcPreArmCheckFailed = false;
     havePreArmCandidateOffset = false;
     if (msp->getState() == 0 && anyRcChannelAssigned())
     {
-        // Read-only: deliberately does not touch lastKnownGood (spec §4.6's
-        // "never write to lastKnownGood" requirement) — this is a
+        // Read-only: deliberately does not touch lastKnownGood — this is a
         // simulation of "what would happen if follow engaged right now,"
         // not a real state transition.
         preArmCandidateOffset = resolveCandidateOffset();
@@ -573,15 +570,15 @@ void FollowManager::loop()
     // [B] local_altitude_cm() is the follower's baro/GPS-fused home-relative
     // estimate; peer->relalt is a raw-GPS-only delta (leader minus
     // follower). Summed here in double precision and rounded once, since
-    // relalt*100 is exact but offset.vertical_m*100 generally isn't
-    // (spec §6.2 — this frame mixing is a known accuracy bound, not a bug;
-    // see FOLLOW_MIN_VSEP_M's GPS-error margin).
+    // relalt*100 is exact but offset.vertical_m*100 generally isn't (this
+    // frame mixing is a known accuracy bound, not a bug; see
+    // FOLLOW_MIN_VSEP_M's GPS-error margin).
     double altCmD = (double)msp->local_altitude_cm()
                    + (double)peer->relalt * 100.0
                    + offset.vertical_m * 100.0;
     int32_t altCm = (int32_t)lround(altCmD);
 
-    // Hard floor (spec §7.6): never command the follower below a
+    // Hard floor: never command the follower below a
     // configurable minimum home-relative altitude, regardless of what the
     // sum above produced — e.g. the leader flying low/landing, or a BELOW
     // slot dragging the follower toward the ground. Clamp, don't reject:
@@ -594,11 +591,11 @@ void FollowManager::loop()
         altCm = floorCm;
     }
 
-    // spec §5.1: attribute the clamp to RC only if the plain configured
+    // Attribute the clamp to RC only if the plain configured
     // (non-RC-scaled) vertical offset would NOT also have clamped. When no
     // channel is assigned to vertical, offset.vertical_m == config.ofsVertM
-    // by construction (§3.2), so this always agrees with the "actual" check
-    // and degrades to today's plain floor-clamp behavior with no special-casing.
+    // by construction, so this always agrees with the "actual" check, with
+    // no special-casing needed.
     bool floorAttributableToRc = false;
     if (floorClamped)
     {
@@ -610,7 +607,7 @@ void FollowManager::loop()
         floorAttributableToRc = altCmStatic >= floorCm;
     }
 
-    // spec §3.2: sequential, single-value condition code — raise to whichever
+    // Sequential, single-value condition code — raise to whichever
     // active condition ranks highest this cycle rather than overwriting in
     // call order (see this file's FollowConditionCode comment).
     FollowConditionCode conditionCode = FOLLOW_CONDITION_NONE;
@@ -640,14 +637,16 @@ void FollowManager::loop()
         return;
     }
 
-    // Nose heading (spec §7.7) — independent of the position target above.
-    // Computed the same way regardless of follower airframe; no craft-type
-    // branch (spec §7.7 explains why that's safe for fixed-wing too).
+    // Nose heading — independent of the position target above. Computed the
+    // same way regardless of follower airframe: unlike the speed
+    // autothrottle below, INAV's HEADING HOLD / yaw-rate PID path isn't
+    // gated to a specific mixer platform type, so no craft-type branch is
+    // needed here.
     int16_t headingDeg = resolveHeadingDeg(peer, courseDeg);
 
     updateDebugGvars(target.lat_1e7, target.lon_1e7, altCm, headingDeg);
 
-    // Speed autothrottle (spec §3.6): gated on a fixed-wing (airplane) mixer
+    // Speed autothrottle: gated on a fixed-wing (airplane) mixer
     // on the follower FC and the pilot's arm switch. engaged already folds
     // in both, so downstream consumers of updateAutothrottleGvars() don't
     // need to check either themselves.
@@ -680,7 +679,7 @@ void FollowManager::loop()
     lastTargetAltCm = altCm;
     lastTargetHeadingDeg = headingDeg;
     lastTargetTime = millis();
-    lastLiveOffset = offset; // spec §7 liveOffset
+    lastLiveOffset = offset; // for statusJson()'s liveOffset
 }
 
 static const char *lockStateName(FollowLockState state)
@@ -743,7 +742,7 @@ void FollowManager::statusJson(JsonDocument *doc)
     (*doc)["rcPreArmCheckFailed"] = rcPreArmCheckFailed;
 }
 
-// Spec §3's status code. IDLE only appears transiently (loop() sets it
+// Status code for statusGvarIndex. IDLE only appears transiently (loop() sets it
 // right before the gate-inactive early return) — included for
 // completeness, not reachable with a nonzero code.
 static int32_t statusGvarValue(FollowLockState state, uint8_t lockedId)
@@ -752,16 +751,17 @@ static int32_t statusGvarValue(FollowLockState state, uint8_t lockedId)
     {
         case FOLLOW_LOCK_ACQUIRING:      return 1;
         case FOLLOW_LOCK_LOCKED:         return 2;
-        // lockedId == 0 only happens here via the id-reuse-mismatch path
-        // in resolveLock() (spec §6.3 caveat of the parent spec) — see
-        // this plan's "ID LOST" decision above.
+        // lockedId == 0 only happens here via the id-reuse-mismatch path in
+        // resolveLock() (a different aircraft claimed the same LoRa slot id
+        // while we were holding) — reported as code 4 ("ID LOST") to
+        // distinguish it from the ordinary holding case (code 3).
         case FOLLOW_LOCK_LOCKED_HOLDING: return lockedId == 0 ? 4 : 3;
         case FOLLOW_LOCK_IDLE:
         default:                          return 0;
     }
 }
 
-// Shared "send only if changed or heartbeat-due" rule (spec §3.3), used by
+// Shared "send only if changed or heartbeat-due" rule, used by
 // every change+heartbeat GVAR below (status, condition flags, autothrottle
 // engage). gvarIndex < 0 means that slot is disabled -- a no-op, leaving
 // *lastSent at its INT32_MIN "never sent" sentinel so a later re-enable
@@ -789,7 +789,7 @@ void FollowManager::updateStatusGvars(FollowConditionCode conditionCode)
     unsigned long now = millis();
     sendGvarIfDue(msp, config.statusGvarIndex, statusGvarValue(state, lockedId),
                   &lastSentStatusGvarValue, &lastStatusGvarSendMs, now);
-    // spec §5.3's 0-3 table, computed by callers now.
+    // conditionCode is the FollowConditionCode value computed by the caller.
     sendGvarIfDue(msp, config.conditionFlagsGvarIndex, conditionCode,
                   &lastSentConditionFlagsGvarValue, &lastConditionFlagsGvarSendMs, now);
 }
@@ -888,13 +888,13 @@ void FollowManager::configJson(JsonDocument *doc) const
     FOLLOW_CONFIG_ROUNDED_FIELDS(JSON_FIELD)
 #undef JSON_FIELD
 
-    // Trigger mode is compile-time-only until Phase 2b (AUX) lands — report
-    // it read-only rather than accepting it via applyConfig() (spec plan's
-    // Phase 3 notes).
+    // Trigger mode is compile-time-only (AUX-channel triggering isn't
+    // implemented yet) — report it read-only rather than accepting it via
+    // applyConfig().
     (*doc)["triggerMode"] = triggerModeName((FollowTriggerMode)FOLLOW_TRIGGER_MODE);
     (*doc)["headingMode"] = headingModeName(config.headingMode);
 
-    // RAM only (spec: FollowConfig.h's FOLLOW_DEBUG_ENABLED comment) — not
+    // RAM only (see FollowConfig.h's FOLLOW_DEBUG_ENABLED comment) — not
     // in FollowEepromRecord, so this always reports false again after a
     // reboot regardless of what was last applied.
     (*doc)["debug"] = config.debug;
@@ -977,12 +977,10 @@ bool FollowManager::applyConfig(const FollowRuntimeConfig &newConfig, String *er
         return false;
     }
 
-    // Previously UI-only (html/follow-logic.js's validateConfig()) — a raw
-    // POST bypassing the web UI could set overlapping GVAR indices/RC
-    // channels and the firmware would accept it (spec
-    // docs/spec/2026-09-03-FollowTestSuite.md §2.3/§7.1). Now that binary
-    // size is no longer the constraint that kept these checks JS-only, they
-    // belong here too so REST-level and UI-level clients get the same
+    // A raw POST bypassing the web UI could set overlapping GVAR
+    // indices/RC channels and the firmware would accept it, so these checks
+    // are enforced here as well as in html/follow-logic.js's
+    // validateConfig(), giving REST-level and UI-level clients the same
     // guarantee.
     if ((newConfig.statusGvarIndex != -1 && newConfig.statusGvarIndex == newConfig.conditionFlagsGvarIndex) ||
         (newConfig.statusGvarIndex != -1 && newConfig.statusGvarIndex == newConfig.targetSpeedGvarIndex) ||
@@ -1022,14 +1020,14 @@ bool FollowManager::applyConfig(const FollowRuntimeConfig &newConfig, String *er
     }
     if (newConfig.speedCorrectionAccelCmS2 < 0)
     {
-        // Unlike the old linear Kp, this is a magnitude fed through
-        // copysignf() in resolveTargetSpeedCmS() — a negative value would
-        // flip the correction to push the follower the wrong way.
+        // This is a magnitude fed through copysignf() in
+        // resolveTargetSpeedCmS() — a negative value would flip the
+        // correction to push the follower the wrong way.
         *errMsg = "speedCorrectionAccelCmS2 must be >= 0";
         return false;
     }
 
-    // Spec §7.4 geometry rules, evaluated against the config's canonical
+    // Offset geometry rules, evaluated against the config's canonical
     // offset — mirrors loop()'s offsetGeometrySane() call so a config that's
     // accepted here can never be rejected by that same check later.
     FollowOffset offset = { newConfig.ofsLongM, newConfig.ofsLatM, newConfig.ofsVertM };
@@ -1040,7 +1038,7 @@ bool FollowManager::applyConfig(const FollowRuntimeConfig &newConfig, String *er
 
     bool targetPeerChanged = (newConfig.targetPeer != config.targetPeer);
     config = newConfig;
-    // §4.4: a config change (new gaps, a reassigned channel) can make the
+    // A config change (new gaps, a reassigned channel) can make the
     // previously-frozen triple meaningless, so re-anchor it to the new
     // static offset — the one point applyConfig() already guarantees is
     // geometry-sane via the offsetGeometrySane() check above.
@@ -1105,7 +1103,7 @@ void FollowManager::loadFromEEPROM()
         // FollowRuntimeConfig's member initializers already seeded.
         return;
     }
-    // Reuse applyConfig()'s validation (spec §7.4 + basic field sanity) so
+    // Reuse applyConfig()'s validation (offset geometry rules + basic field sanity) so
     // a corrupted or stale-schema record (bit flips, a struct layout that
     // changed since it was written) can't silently arm follow with insane
     // geometry. forceReacquire() is a no-op here — no peer lock exists yet

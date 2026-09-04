@@ -1,9 +1,8 @@
-// spec docs/spec/2026-09-03-FollowTestSuite.md §4.8 -- the two-layer RC
-// safety net (RcAxisControl spec §4), axisSignLocked()/candidateOffsetOk().
-// Pure predicate tests only -- the loop()-cycle-level bullets in this same
-// spec section (resolveOffset()'s freeze behavior, applyConfig()'s
-// lastKnownGood reset) need a locked peer via the state machine and are
-// deferred to Phase 3 alongside the rest of the fake-driven coverage.
+// The two-layer RC safety net, axisSignLocked()/candidateOffsetOk(). Pure
+// predicate tests only -- resolveOffset()'s freeze behavior (which needs a
+// locked peer via the state machine) is instead exercised indirectly in
+// test_gvar_reporting.cpp, as a side effect of a condition-code-priority
+// test that drives an RC-rejected candidate through loop().
 
 #include <unity.h>
 

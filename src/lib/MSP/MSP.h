@@ -686,8 +686,7 @@ struct msp_set_wp_t {
 // supports MAX_GLOBAL_VARIABLES == 8, verified against inav/src/main/
 // programming/global_variables.h); value is INAV's native int32
 // (verified against inav/src/main/fc/fc_msp.c's MSP2_INAV_SET_GVAR
-// handler, which requires exactly a 5-byte payload — not 2 bytes, despite
-// the parent spec's §2.1 text, corrected here).
+// handler, which requires exactly a 5-byte payload, not 2 bytes).
 struct msp_set_gvar_t {
   uint8_t index;
   int32_t value;

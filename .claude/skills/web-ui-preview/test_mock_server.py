@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""spec docs/spec/2026-09-03-FollowTestSuite.md §3.6/§4.15 -- cross-mirror
-test for mock_server.py's validate_config(), a hand-maintained mirror of
-FollowManager::applyConfig() (src/lib/Follow/FollowManager.cpp).
+"""Runs mock_server.py's validate_config() -- a hand-maintained mirror of
+FollowManager::applyConfig() (src/lib/Follow/FollowManager.cpp) -- against
+the shared fixture cases in docs/spec/fixtures/follow-config-cases.json,
+the same cases the C++ and JS mirrors are tested against, to keep all
+three mirrors in sync.
 
 Stdlib unittest only (no pytest in this environment, and the project has
 no Python test infra to build on yet) -- run with:

@@ -1,7 +1,6 @@
 #pragma once
 
-// Native-only stand-in for the real src/main.h (spec
-// docs/spec/2026-09-03-FollowTestSuite.md §3.4) -- provides only what
+// Native-only stand-in for the real src/main.h -- provides only what
 // FollowManager.cpp actually reads from main.h: sys.phase (gates loop()) and
 // cfg (its sizeof anchors FOLLOW_EEPROM_OFFSET). Deliberately does not pull
 // in the real main.h, which drags in the full radio/OTA/WiFi stack.

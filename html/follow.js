@@ -6,8 +6,8 @@ import { slotFromOffset, offsetFromSlot, validateConfig } from './follow-logic.j
 // Permit using the web ui locally for development (mirrors main.js).
 const ENDPOINT_PREFIX = window.location.host != "192.168.4.1" ? "http://192.168.4.1" : "";
 
-// UI-only imperial readouts (spec says all inputs/values are metric on the
-// wire — these never leave the browser and are never sent back on save).
+// UI-only imperial readouts — all inputs/values are metric on the
+// wire; these never leave the browser and are never sent back on save.
 const M_TO_FT = 3.28084;
 const MPS_TO_MPH = 2.23694;
 const asFt = m => `≈ ${(+m * M_TO_FT).toFixed(1)} ft`;
@@ -40,7 +40,7 @@ const rcChannelMax = 16;
 const rcChannelLabelFn = v => v === -1 ? 'Disabled' : String(v);
 
 // Mirrors InavPlatformType (src/lib/MSP/MSP.h) — only used for the
-// autothrottle platform-gate explanatory tip (spec §3.6).
+// autothrottle platform-gate explanatory tip.
 const platformTypeNames = ['Multirotor', 'Airplane', 'Helicopter', 'Tricopter', 'Rover', 'Boat'];
 const platformTypeName = t => platformTypeNames[t] || 'Unknown';
 
@@ -53,7 +53,7 @@ export default function FollowPanel() {
   const [validationError, setValidationError] = useState(null);
 
   // "advanced" is a local display preference only — both views edit the
-  // same canonical ofsLongM/ofsLatM/ofsVertM fields (spec §7.3), so there's
+  // same canonical ofsLongM/ofsLatM/ofsVertM fields, so there's
   // no server-side mode to restore it from.
   const applyFetchedConfig = r => setConfig(r);
   const refreshConfig = () => fetch(ENDPOINT_PREFIX + '/followmanager/config').then(r => r.json()).then(applyFetchedConfig);
@@ -65,7 +65,7 @@ export default function FollowPanel() {
     refreshStatus();
     refreshPeers();
     // Status/peers poll continuously so the panel is useful as a bench-test
-    // aid (spec §12.1); config is only re-fetched after a successful save,
+    // aid; config is only re-fetched after a successful save,
     // since polling it would clobber whatever the user is mid-edit on.
     const t = setInterval(() => { refreshStatus(); refreshPeers(); }, 1000);
     return () => clearInterval(t);
@@ -141,8 +141,8 @@ export default function FollowPanel() {
 
   const onsave = () => applyLive('Applied (live, session-only)');
 
-  // Phase 4D: applies the current form state to RAM (same as onsave), then
-  // — only if that succeeded — commits it to EEPROM (Phase 4C) so it
+  // Applies the current form state to RAM (same as onsave), then
+  // — only if that succeeded — commits it to EEPROM so it
   // survives a reboot.
   const onsaveEeprom = () => applyLive('Applied — saving to EEPROM…').then(ok => {
     if (!ok) return false;
@@ -304,8 +304,8 @@ export default function FollowPanel() {
       ${sectionError('gvar')}
       ${sectionError('autothrottle')}
       ${status.platformType !== 1 && html`<div class="bg-gray-50 border border-gray-200 text-gray-600 rounded-md px-3 py-2 text-sm mb-2">Requires a fixed-wing (airplane) mixer on the follower FC — detected platform: ${platformTypeName(status.platformType)}.<//>`}
-      <${Setting} title="Target Speed GVAR Index" tip="Which INAV Global Variable receives the commanded ground-speed setpoint (cm/s), fed directly into PID3's setpoint (spec §3.1)." value=${config.targetSpeedGvarIndex} setfn=${mksetfn('targetSpeedGvarIndex')} type="select" options=${gvarIndexOptions} disabled=${status.platformType !== 1} />
-      <${Setting} title="Autothrottle Engage GVAR Index" tip="Which INAV Global Variable receives the engage flag (1=engaged, 0=not) the INAV-side Logic Conditions use to gate the throttle override (spec §3.2)." value=${config.autothrottleEngageGvarIndex} setfn=${mksetfn('autothrottleEngageGvarIndex')} type="select" options=${gvarIndexOptions} disabled=${status.platformType !== 1} />
+      <${Setting} title="Target Speed GVAR Index" tip="Which INAV Global Variable receives the commanded ground-speed setpoint (cm/s), fed directly into PID3's setpoint." value=${config.targetSpeedGvarIndex} setfn=${mksetfn('targetSpeedGvarIndex')} type="select" options=${gvarIndexOptions} disabled=${status.platformType !== 1} />
+      <${Setting} title="Autothrottle Engage GVAR Index" tip="Which INAV Global Variable receives the engage flag (1=engaged, 0=not) the INAV-side Logic Conditions use to gate the throttle override." value=${config.autothrottleEngageGvarIndex} setfn=${mksetfn('autothrottleEngageGvarIndex')} type="select" options=${gvarIndexOptions} disabled=${status.platformType !== 1} />
       <${Setting} title="Arm Channel" tip="RC channel used as the autothrottle arm switch. -1 disables and means always armed whenever the lock/airframe conditions are otherwise satisfied. Pre-configurable even before a compatible FC is connected." value=${config.autothrottleEnableRcChannel} setfn=${mksetfn('autothrottleEnableRcChannel')} type="spinner" min=${rcChannelMin} max=${rcChannelMax} labelFn=${rcChannelLabelFn} />
       <div class="flex gap-4">
         <div class="flex-1"><${Setting} title="Arm Range Min" tip="Lower bound (µs) of the arm switch's 'armed' pulse-width range. Together with the max bound, this closed range lets a 2-way, 3-way, or 6-pos switch's specific detent(s) mean armed, not just a single switch-high threshold. Pre-configurable even before an Arm Channel is assigned." value=${config.autothrottleEnableMinThresholdUs} setfn=${mksetfn('autothrottleEnableMinThresholdUs')} type="number" addonRight="µs" /><//>
@@ -314,7 +314,7 @@ export default function FollowPanel() {
       <${Setting} title="Slot-Lag Correction Accel" tip="Max closing acceleration/deceleration used to speed up/slow down beyond the leader's raw ground speed and correct for lagging/leading the follow slot. Higher values catch up faster but brake harder on final approach into the slot; 0 = pure feedforward (mirror the leader's speed exactly)." value=${config.speedCorrectionAccelCmS2} setfn=${mksetfn('speedCorrectionAccelCmS2')} type="number" addonRight="cm/s²" disabled=${status.platformType !== 1} />
       <${Setting} title="Min Target Speed" tip="Lower clamp on the commanded speed setpoint. Set comfortably above this airframe's stall speed (roughly a third above stall is a reasonable starting point) — there is no dynamic sink-rate protection yet, so this is the feature's only stall-safety mechanism this iteration." value=${config.minTargetSpeedMps} setfn=${mksetfn('minTargetSpeedMps')} type="number" addonRight="m/s" imperial=${asMph(config.minTargetSpeedMps)} disabled=${status.platformType !== 1} />
       <${Setting} title="Max Target Speed" tip="Upper clamp on the commanded speed setpoint." value=${config.maxTargetSpeedMps} setfn=${mksetfn('maxTargetSpeedMps')} type="number" addonRight="m/s" imperial=${asMph(config.maxTargetSpeedMps)} disabled=${status.platformType !== 1} />
-      <div class="text-xs text-gray-500 mt-2">Requires INAV 9.0+ (GVARs) and MSP2_INAV_MIXER support (INAV 1.9+) on the follower FC — see docs/spec/2026-08-28-FollowSpeedAutothrottle.md for the required INAV-side Logic Condition rewrite.</div>
+      <div class="text-xs text-gray-500 mt-2">Requires INAV 9.0+ (GVARs) and MSP2_INAV_MIXER support (INAV 1.9+) on the follower FC, plus an INAV-side Logic Condition that reads the Target Speed and Autothrottle Engage GVARs above and drives the mixer's PID3 setpoint accordingly.</div>
       ${status.autothrottleArmed !== undefined && html`
       <div class="grid grid-cols-2 gap-2 my-1 pt-3 mt-2 border-t">
         <label class="flex items-center text-sm text-gray-700 mr-2 font-medium">RC Switch<//>

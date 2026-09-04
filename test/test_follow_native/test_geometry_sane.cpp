@@ -1,8 +1,7 @@
-// spec docs/spec/2026-09-03-FollowTestSuite.md §4.3 -- offsetGeometrySane()
-// (parent spec §7.4 safety bounds). Pure predicate tests plus one
-// applyConfig() end-to-end case; no fakes are exercised (applyConfig()
-// never touches msp/gnss/peers), so this still fits Phase 2's "no fakes
-// needed" scope even though it constructs a FollowManager.
+// offsetGeometrySane()'s minimum-separation safety bounds. Pure predicate
+// tests plus one applyConfig() end-to-end case; no fakes are exercised
+// (applyConfig() never touches msp/gnss/peers), even though it constructs
+// a FollowManager.
 
 #include <unity.h>
 #include <cstring>
@@ -81,6 +80,6 @@ void test_applyConfig_rejects_geometrically_insane_static_offset()
     TEST_ASSERT_TRUE(strstr(err.c_str(), "minSepM") != nullptr);
 
     // A rejected applyConfig() must leave the live config completely
-    // untouched (spec §4.13).
+    // untouched.
     TEST_ASSERT_EQUAL_DOUBLE(before.ofsLongM, fm.getConfig().ofsLongM);
 }

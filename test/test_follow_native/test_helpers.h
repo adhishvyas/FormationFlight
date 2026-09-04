@@ -6,10 +6,9 @@
 #include "FakePeers.h"
 #include "Arduino.h" // native_millis_set()/native_millis_advance()
 
-// Shared driving helpers for tests that need loop()-cycle-level behavior
-// (spec docs/spec/2026-09-03-FollowTestSuite.md Phase 3) -- resolveLock(),
-// resolveOffset(), etc. are private FollowManager methods, so this is the
-// only way to exercise them from outside.
+// Shared driving helpers for tests that need loop()-cycle-level behavior --
+// resolveLock(), resolveOffset(), etc. are private FollowManager methods,
+// so this is the only way to exercise them from outside.
 
 // Advances native time past the default emitHz's period (250ms at 4Hz) so
 // loop()'s own nextRunTime gate doesn't swallow the next cycle.

@@ -1,6 +1,5 @@
-// Phase 1 smoke test (spec docs/spec/2026-09-03-FollowTestSuite.md §6
-// rollout plan) -- proves the native env + seams + fakes actually compile,
-// link, and run together, independent of any specific §4 coverage.
+// Smoke test that proves the native env + seams + fakes actually compile,
+// link, and run together, independent of any of this suite's other coverage.
 
 #include <unity.h>
 

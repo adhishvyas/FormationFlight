@@ -3,8 +3,8 @@
 #include "../../../src/lib/Follow/FollowDeps.h"
 #include "../../../src/lib/GNSS/GNSSManager.h"
 
-// Test double for IFollowGnss (spec docs/spec/2026-09-03-FollowTestSuite.md
-// §3.3). Only the "self position" lookup needs faking -- the great-circle
+// Test double for IFollowGnss. Only the "self position" lookup needs
+// faking -- the great-circle
 // math itself (distanceMeters()/courseDegrees(), file-local to
 // GNSSManager.cpp) is already pure and trustworthy, so this delegates to a
 // real GNSSManager instance with its own spoofing hook (spoofLocationEnabled/

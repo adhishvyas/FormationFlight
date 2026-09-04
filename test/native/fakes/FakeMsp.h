@@ -16,9 +16,8 @@ struct SentGvar {
     int32_t value;
 };
 
-// Test double for IFollowMsp (spec docs/spec/2026-09-03-FollowTestSuite.md
-// §3.3). Every outbound call is recorded (not just applied) so tests can
-// assert both that something was sent and what.
+// Test double for IFollowMsp. Every outbound call is recorded (not just
+// applied) so tests can assert both that something was sent and what.
 class FakeMsp : public IFollowMsp {
 public:
     // 0 = disarmed, matching the real MSPManager::getState() convention
@@ -31,7 +30,8 @@ public:
 
     // channel1Based -> pulse width (us). An absent key simulates
     // getRcChannelUs() returning false -- "no FC connected, or channel out
-    // of MSP_RC's range" (spec §3.1/§3.2's one fallback-to-configuredM case).
+    // of MSP_RC's range," the one case resolveAxisOffset() falls back to
+    // configuredM for.
     std::map<uint8_t, uint16_t> rcChannelUs;
 
     std::vector<SentWaypoint> sentWaypoints;

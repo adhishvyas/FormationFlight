@@ -1,6 +1,5 @@
-// spec docs/spec/2026-09-03-FollowTestSuite.md §4.4 (altitude floor, parent
-// spec §7.6) and §4.12 (targetTooFar() suppression, parent spec §7.4
-// runtime check). Both driven through loop() via FakeMsp/FakeGnss/FakePeers.
+// Altitude floor clamping and targetTooFar() suppression. Both driven
+// through loop() via FakeMsp/FakeGnss/FakePeers.
 
 #include <unity.h>
 #include <cstring>

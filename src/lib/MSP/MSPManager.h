@@ -23,9 +23,8 @@ public:
     void getName(char *name, size_t length);
     MSPHost getFCVariant();
     static bool hostIsFlightController(MSPHost host);
-    // Returns the connected FC's mixer platform type (MSP2_INAV_MIXER, spec
-    // docs/spec/2026-08-28-FollowSpeedAutothrottle.md §2.4). Cached once a
-    // valid reply is received; retried on every call until then (no
+    // Returns the connected FC's mixer platform type (MSP2_INAV_MIXER).
+    // Cached once a valid reply is received; retried on every call until then (no
     // sys.phase-based give-up, since — unlike getFCVariant() — this is never
     // polled during MODE_HOST_SCAN). Returns INAV_PLATFORM_UNKNOWN until a
     // real reply is received, distinguishable from a genuine
@@ -42,8 +41,7 @@ public:
     // Whether the FC currently has GCS NAV active (MSP_MODE_GCSNAV), e.g. for follow-mode gating.
     bool isGCSNavActive();
     // Reads a single RC channel's value (µs) from the FC over a cached MSP_RC
-    // poll (spec docs/spec/2026-08-15-FollowRcAxisControl.md §2.1/§9).
-    // channel1Based is 1-16 (MSP_MAX_SUPPORTED_CHANNELS). Returns false (and
+    // poll. channel1Based is 1-16 (MSP_MAX_SUPPORTED_CHANNELS). Returns false (and
     // leaves *outUs untouched) only if not connected to a flight controller or
     // channel1Based is out of range. A transient poll miss on an otherwise-
     // connected FC is NOT one of those failure cases — it returns the last
@@ -53,7 +51,7 @@ public:
     void sendRadar(const peer_t *peer);
     // Sends the INAV follow-me special waypoint #255 via MSP_SET_WP.
     // Requires NAV POSHOLD + GCS NAV active on the follower FC.
-    // headingDeg: commanded nose heading in degrees, 1-360 (spec §7.7), or 0
+    // headingDeg: commanded nose heading in degrees, 1-360, or 0
     // to leave heading untouched this cycle — callers must map a computed
     // heading of exactly 0 to 360 themselves (FollowManager does). Kept as a
     // best-effort, forward-compatible write: verified against current INAV
@@ -66,8 +64,8 @@ public:
     // some other NAV_REQUIRE_MAGHOLD state — FF already sends the right
     // value with no code change needed.
     void sendFollowWaypoint(int32_t lat_1e7, int32_t lon_1e7, int32_t alt_cm, int16_t headingDeg);
-    // Explicitly sets INAV's heading-hold target via MSP_SET_HEAD (spec
-    // §7.7), decoupled from the WP#255 position stream above and, today, the
+    // Explicitly sets INAV's heading-hold target via MSP_SET_HEAD, decoupled
+    // from the WP#255 position stream above and, today, the
     // *only* path that actually works for a follower in NAV POSHOLD_3D.
     // Unlike WP#255's p1, this command has no gating in INAV's handler — it
     // always writes — but the yaw-rate PID only ever reads that target when
@@ -81,13 +79,12 @@ public:
     // Whether INAV's HEADING HOLD ("MAG") box is active on the connected FC
     // (MSP_MODE_MAG bit of getActiveModes()) — the precondition for
     // sendSetHead()'s target to actually reach the yaw-rate PID while the
-    // follower is in NAV POSHOLD_3D (spec §7.7 follow-up; see sendSetHead()'s
-    // comment for why WP#255's p1 alone was never sufficient here).
+    // follower is in NAV POSHOLD_3D (see sendSetHead()'s comment for why
+    // WP#255's p1 alone was never sufficient here).
     bool isHeadingHoldActive();
-    // Writes a single INAV Global Variable over MSP2_INAV_SET_GVAR (spec
-    // docs/spec/2026-08-13-FollowStatusOsdGvar.md). One-way, best-effort, no
-    // ACK wait. Silently no-ops if the connected FC isn't INAV 9.0+ (§2.2) —
-    // callers don't need to check support themselves.
+    // Writes a single INAV Global Variable over MSP2_INAV_SET_GVAR. One-way,
+    // best-effort, no ACK wait. Silently no-ops if the connected FC isn't
+    // INAV 9.0+ — callers don't need to check support themselves.
     void sendGvar(uint8_t index, int32_t value);
     void sendLocation(GNSSLocation location);
     void begin(Stream &stream);

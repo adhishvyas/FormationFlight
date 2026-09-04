@@ -1,5 +1,4 @@
-// spec docs/spec/2026-09-03-FollowTestSuite.md §4.1 -- peer lock state
-// machine (parent spec §6.3, resolveLock(), driven through loop() since
+// Peer lock state machine (resolveLock(), driven through loop() since
 // resolveLock() itself is a private FollowManager method). Needs FakePeers
 // (+ FakeMsp for the follow gate).
 
@@ -42,7 +41,7 @@ void test_fresh_manager_locks_within_one_cycle_once_peer_exists()
     FollowManager fm(&msp, &gnss, &peers);
     msp.gcsNavActive = true;
 
-    tick(fm); // IDLE -> ACQUIRING -> LOCKED, all in this one cycle (spec §4.1)
+    tick(fm); // IDLE -> ACQUIRING -> LOCKED, all in this one cycle
     TEST_ASSERT_EQUAL_STRING("LOCKED", stateOf(fm));
 
     DynamicJsonDocument doc(1024);
@@ -148,8 +147,8 @@ void test_locked_holding_id_reused_by_different_aircraft_does_not_relock()
     tick(fm);
     TEST_ASSERT_EQUAL_STRING("LOCKED_HOLDING", stateOf(fm));
 
-    // Same LoRa slot id, but a different aircraft's name -- the spec §6.3
-    // caveat: must NOT silently adopt it under the old id.
+    // Same LoRa slot id, but a different aircraft's name -- must NOT
+    // silently adopt it under the old id.
     peers.setPeer(0, /*id=*/1, 1.0, 1.0, 0.0, 0.0, /*relalt=*/0, "XYZ");
     tick(fm);
 

@@ -27,7 +27,7 @@ void config_init(bool forcedefault)
 {
     size_t cfgSize = sizeof(cfg);
     // Reserve cfg's own footprint plus FollowManager's persisted region,
-    // which lives immediately after it (Phase 4B — see
+    // which lives immediately after it (see
     // FollowManager::loadFromEEPROM()/saveToEEPROM()).
     EEPROM.begin(cfgSize + sizeof(FollowEepromRecord));
 

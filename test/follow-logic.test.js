@@ -15,14 +15,14 @@ const fixturePath = path.join(__dirname, '..', 'docs', 'spec', 'fixtures', 'foll
 const fixture = JSON.parse(readFileSync(fixturePath, 'utf8'));
 
 // ---- §4.15 cross-mirror equivalence (JS side): every fixture case's
-// jsValid expectation, shared rules and JS-only superset rules alike. ----
+// expectValid expectation, shared across all three validators. ----
 
 test('validateConfig() matches every fixture case (spec §4.15)', () => {
   for (const tc of fixture.cases) {
     const cfg = { ...fixture.baseline, ...tc.overrides };
     const err = validateConfig(cfg);
     const isValid = err === null;
-    assert.equal(isValid, tc.jsValid, `case "${tc.name}": expected jsValid=${tc.jsValid}, got ${isValid} (err=${JSON.stringify(err)})`);
+    assert.equal(isValid, tc.expectValid, `case "${tc.name}": expected expectValid=${tc.expectValid}, got ${isValid} (err=${JSON.stringify(err)})`);
   }
 });
 
@@ -55,11 +55,11 @@ test('offsetFromSlot() maps the zero label back to exactly 0', () => {
   assert.equal(offsetFromSlot('LEVEL', 10, 'ABOVE', 'BELOW'), 0);
 });
 
-// ---- §4.16 validateConfig()'s own rule set: JS-only superset cases,
-// asserted explicitly by name (not just via the fixture loop above) so a
-// failure here names the exact rule, not just "some fixture case". ----
+// ---- §4.16 validateConfig()'s own rule set: the uniqueness/ordering rules
+// also covered by the fixture loop above, asserted explicitly by name here
+// so a failure names the exact rule, not just "some fixture case". ----
 
-test('validateConfig() JS-only superset rules', () => {
+test('validateConfig() uniqueness/ordering rules', () => {
   const base = fixture.baseline;
 
   const gvarClash = validateConfig({ ...base, statusGvarIndex: 1, conditionFlagsGvarIndex: 1 });

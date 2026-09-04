@@ -62,6 +62,12 @@ static const ConfigCase kConfigCases[] = {
     {"speedCorrectionAccelCmS2=0 passes", [](FollowRuntimeConfig &c) { c.speedCorrectionAccelCmS2 = 0; }, true},
     {"offset magnitude just under minSepM fails", [](FollowRuntimeConfig &c) { c.ofsLongM = -2; c.ofsLatM = 0; c.ofsVertM = 0; c.minSepM = 8; }, false},
     {"offset magnitude at minSepM passes", [](FollowRuntimeConfig &c) { c.ofsLongM = -8; c.ofsLatM = 0; c.ofsVertM = 0; c.minSepM = 8; }, true},
+    // spec docs/spec/2026-09-03-FollowTestSuite.md §2.3/§7.1 -- previously
+    // JS-only (html/follow-logic.js's validateConfig()), now enforced here too.
+    {"statusGvarIndex==conditionFlagsGvarIndex fails", [](FollowRuntimeConfig &c) { c.statusGvarIndex = 1; c.conditionFlagsGvarIndex = 1; }, false},
+    {"rcLongChannel==rcLatChannel fails", [](FollowRuntimeConfig &c) { c.rcLongChannel = 5; c.rcLatChannel = 5; }, false},
+    {"autothrottleEnableRcChannel overlaps rc axis channel fails", [](FollowRuntimeConfig &c) { c.rcLongChannel = 5; c.autothrottleEnableRcChannel = 5; }, false},
+    {"autothrottleEnableMaxThresholdUs<=MinThresholdUs fails", [](FollowRuntimeConfig &c) { c.autothrottleEnableMinThresholdUs = 2100; c.autothrottleEnableMaxThresholdUs = 1700; }, false},
 };
 // clang-format on
 
@@ -74,7 +80,13 @@ void test_applyConfig_validation_rules_table()
 
     for (const auto &tc : kConfigCases)
     {
-        FollowRuntimeConfig cfg = fm.getConfig(); // fresh defaults each case
+        // Default-constructed, not fm.getConfig() -- the latter reflects
+        // whatever the last *accepted* case in this loop left live, so an
+        // earlier passing case (e.g. statusGvarIndex=7) would otherwise
+        // leak into a later one (e.g. conditionFlagsGvarIndex=7) and the
+        // GVAR-uniqueness rule would reject it for a reason unrelated to
+        // what this case is actually testing.
+        FollowRuntimeConfig cfg;
         tc.mutate(cfg);
         String err;
         bool ok = fm.applyConfig(cfg, &err);

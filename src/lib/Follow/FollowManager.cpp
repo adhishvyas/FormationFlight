@@ -976,6 +976,45 @@ bool FollowManager::applyConfig(const FollowRuntimeConfig &newConfig, String *er
         *errMsg = "autothrottleEnableRcChannel must be -1 (disabled) or 1-16";
         return false;
     }
+
+    // Previously UI-only (html/follow-logic.js's validateConfig()) — a raw
+    // POST bypassing the web UI could set overlapping GVAR indices/RC
+    // channels and the firmware would accept it (spec
+    // docs/spec/2026-09-03-FollowTestSuite.md §2.3/§7.1). Now that binary
+    // size is no longer the constraint that kept these checks JS-only, they
+    // belong here too so REST-level and UI-level clients get the same
+    // guarantee.
+    if ((newConfig.statusGvarIndex != -1 && newConfig.statusGvarIndex == newConfig.conditionFlagsGvarIndex) ||
+        (newConfig.statusGvarIndex != -1 && newConfig.statusGvarIndex == newConfig.targetSpeedGvarIndex) ||
+        (newConfig.statusGvarIndex != -1 && newConfig.statusGvarIndex == newConfig.autothrottleEngageGvarIndex) ||
+        (newConfig.conditionFlagsGvarIndex != -1 && newConfig.conditionFlagsGvarIndex == newConfig.targetSpeedGvarIndex) ||
+        (newConfig.conditionFlagsGvarIndex != -1 && newConfig.conditionFlagsGvarIndex == newConfig.autothrottleEngageGvarIndex) ||
+        (newConfig.targetSpeedGvarIndex != -1 && newConfig.targetSpeedGvarIndex == newConfig.autothrottleEngageGvarIndex))
+    {
+        *errMsg = "GVAR indices must be unique (or -1/disabled)";
+        return false;
+    }
+    if ((newConfig.rcLongChannel != -1 && newConfig.rcLongChannel == newConfig.rcLatChannel) ||
+        (newConfig.rcLongChannel != -1 && newConfig.rcLongChannel == newConfig.rcVertChannel) ||
+        (newConfig.rcLatChannel != -1 && newConfig.rcLatChannel == newConfig.rcVertChannel))
+    {
+        *errMsg = "rcLongChannel/rcLatChannel/rcVertChannel must be unique (or -1/disabled)";
+        return false;
+    }
+    if (newConfig.autothrottleEnableRcChannel != -1 &&
+        (newConfig.autothrottleEnableRcChannel == newConfig.rcLongChannel ||
+         newConfig.autothrottleEnableRcChannel == newConfig.rcLatChannel ||
+         newConfig.autothrottleEnableRcChannel == newConfig.rcVertChannel))
+    {
+        *errMsg = "autothrottleEnableRcChannel must differ from the RC axis channels (or -1/disabled)";
+        return false;
+    }
+    if (newConfig.autothrottleEnableMaxThresholdUs <= newConfig.autothrottleEnableMinThresholdUs)
+    {
+        *errMsg = "autothrottleEnableMaxThresholdUs must be > autothrottleEnableMinThresholdUs";
+        return false;
+    }
+
     if (newConfig.maxTargetSpeedMps <= newConfig.minTargetSpeedMps || newConfig.minTargetSpeedMps < 0)
     {
         *errMsg = "maxTargetSpeedMps must be > minTargetSpeedMps >= 0";

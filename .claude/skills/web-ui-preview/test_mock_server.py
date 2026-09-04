@@ -35,8 +35,8 @@ class ValidateConfigFixtureTest(unittest.TestCase):
                 err = validate_config(cfg)
                 is_valid = err is None
                 self.assertEqual(
-                    is_valid, tc["pythonValid"],
-                    f'case "{tc["name"]}": expected pythonValid={tc["pythonValid"]}, '
+                    is_valid, tc["expectValid"],
+                    f'case "{tc["name"]}": expected expectValid={tc["expectValid"]}, '
                     f'got {is_valid} (err={err!r})',
                 )
 

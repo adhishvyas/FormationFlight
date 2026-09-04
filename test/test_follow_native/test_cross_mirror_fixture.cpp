@@ -2,7 +2,7 @@
 // the cross-mirror fixture. Reads the same JSON fixture the Python
 // (test_mock_server.py) and Node (test/follow-logic.test.js) tests read,
 // builds a FollowRuntimeConfig from each case, and checks
-// FollowManager::applyConfig()'s verdict against that case's cppValid.
+// FollowManager::applyConfig()'s verdict against that case's expectValid.
 
 #include <unity.h>
 #include <fstream>
@@ -98,11 +98,11 @@ void test_applyConfig_matches_every_fixture_case()
         FollowRuntimeConfig cfg = configFromJson(merged);
         String err;
         bool ok = fm.applyConfig(cfg, &err);
-        bool expected = tc["cppValid"].as<bool>();
+        bool expected = tc["expectValid"].as<bool>();
 
         if (ok != expected)
         {
-            String msg = String("case \"") + tc["name"].as<const char *>() + "\": expected cppValid=" +
+            String msg = String("case \"") + tc["name"].as<const char *>() + "\": expected expectValid=" +
                          (expected ? "true" : "false") + ", got " + (ok ? "true" : "false");
             TEST_FAIL_MESSAGE(msg.c_str());
         }

@@ -266,6 +266,17 @@ def followmanager_status(query=None):
     return doc
 
 
+# PeerManager.h's NODES_MAX (src/lib/Peers/PeerManager.h) — 0 = FIRST_ACTIVE,
+# 1-NODES_MAX pin to a specific peer id (spec §6.3).
+NODES_MAX = 6
+
+# FollowManager.cpp's offsetGeometrySane() (spec §7.4), used by both loop()
+# (runtime) and applyConfig() (config-validation time) on the firmware side —
+# mirrored here so a geometrically-insane static offset is rejected the same
+# way in the mock as on real firmware.
+STACKED_HORIZONTAL_EPSILON_M = 0.5
+
+
 # Hand-maintained mirror of FollowManager::applyConfig() (src/lib/Follow/
 # FollowManager.cpp) for dev-only client testing — not a substitute for the
 # firmware's own validation, just enough to exercise the UI's error paths.
@@ -280,6 +291,8 @@ def validate_config(cfg):
         return "maxTargetDistM must be > 0"
     if cfg.get("minCourseSpeed", 0) < 0:
         return "minCourseSpeed must be >= 0"
+    if cfg.get("targetPeer", 0) > NODES_MAX:
+        return "targetPeer out of range"
     sgi = cfg.get("statusGvarIndex", -1)
     if sgi < -1 or sgi > 7:
         return "statusGvarIndex must be -1 (disabled) or 0-7"
@@ -297,14 +310,41 @@ def validate_config(cfg):
     art = cfg.get("autothrottleEnableRcChannel", -1)
     if art != -1 and (art < 1 or art > 16):
         return "autothrottleEnableRcChannel must be -1 (disabled) or 1-16"
-    # No min-vs-max ordering check for autothrottleEnableMinThresholdUs/
-    # autothrottleEnableMaxThresholdUs, matching applyConfig() — that check
-    # is UI-only (html/follow.js's validateConfig()), deliberately not
-    # duplicated here (spec plan's B work item note).
+
+    gvar_fields = ["statusGvarIndex", "conditionFlagsGvarIndex",
+                   "targetSpeedGvarIndex", "autothrottleEngageGvarIndex"]
+    gvar_values = [cfg.get(f, -1) for f in gvar_fields if cfg.get(f, -1) != -1]
+    if len(set(gvar_values)) != len(gvar_values):
+        return "GVAR indices must be unique (or -1/disabled)"
+    rc_fields = ["rcLongChannel", "rcLatChannel", "rcVertChannel"]
+    rc_values = [cfg.get(f, -1) for f in rc_fields if cfg.get(f, -1) != -1]
+    if len(set(rc_values)) != len(rc_values):
+        return "rcLongChannel/rcLatChannel/rcVertChannel must be unique (or -1/disabled)"
+    if art != -1 and art in rc_values:
+        return "autothrottleEnableRcChannel must differ from the RC axis channels (or -1/disabled)"
+    if cfg.get("autothrottleEnableMaxThresholdUs", 0) <= cfg.get("autothrottleEnableMinThresholdUs", 0):
+        return "autothrottleEnableMaxThresholdUs must be > autothrottleEnableMinThresholdUs"
+
     if cfg.get("maxTargetSpeedMps", 0) <= cfg.get("minTargetSpeedMps", 0) or cfg.get("minTargetSpeedMps", 0) < 0:
         return "maxTargetSpeedMps must be > minTargetSpeedMps >= 0"
     if cfg.get("speedCorrectionAccelCmS2", 0) < 0:
         return "speedCorrectionAccelCmS2 must be >= 0"
+
+    # Spec §7.4 geometry rules, mirroring FollowManager.cpp's
+    # offsetGeometrySane() so a config accepted here can't be geometrically
+    # insane (minimum 3D separation, minimum vertical gap when stacked).
+    long_m = cfg.get("ofsLongM", 0.0)
+    lat_m = cfg.get("ofsLatM", 0.0)
+    vert_m = cfg.get("ofsVertM", 0.0)
+    horizontal_mag = math.sqrt(long_m * long_m + lat_m * lat_m)
+    mag3d = math.sqrt(horizontal_mag * horizontal_mag + vert_m * vert_m)
+    min_sep_m = cfg.get("minSepM", 0.0)
+    if mag3d < min_sep_m:
+        return "slot magnitude is below minSepM (spec §7.4 minimum 3D separation)"
+    min_vsep_m = cfg.get("minVSepM", 0.0)
+    if horizontal_mag < STACKED_HORIZONTAL_EPSILON_M and abs(vert_m) < min_vsep_m:
+        return "stacked slot's vertical offset is below minVSepM (spec §7.4)"
+
     return None
 
 

@@ -12,6 +12,12 @@
 // client-side isn't a substitute for server-side).
 export const STACKED_HORIZONTAL_EPSILON_M = 0.5;
 
+// Mirrors PeerManager.h's NODES_MAX (src/lib/Peers/PeerManager.h) — 0 =
+// FIRST_ACTIVE, 1-NODES_MAX pin to a specific peer id (spec §6.3).
+const NODES_MAX = 6;
+// Mirrors MSP.h's MSP_MAX_SUPPORTED_CHANNELS (src/lib/MSP/MSP.h).
+const MSP_MAX_SUPPORTED_CHANNELS = 16;
+
 // The AHEAD/BEHIND/LEFT/RIGHT/ABOVE/BELOW "friendly grid" is purely a
 // client-side view over the canonical signed offset that's actually stored
 // (ofsLongM/ofsLatM/ofsVertM) — the server only ever sees that one
@@ -41,6 +47,9 @@ export function validateConfig(cfg) {
   }
   if (!(cfg.maxTargetDistM > 0)) return { section: 'bounds', message: 'Max target distance must be > 0' };
   if (cfg.minCourseSpeed < 0) return { section: 'bounds', message: 'Min course speed must be >= 0' };
+  if (cfg.targetPeer < 0 || cfg.targetPeer > NODES_MAX) {
+    return { section: 'trigger', message: 'Target Peer out of range' };
+  }
 
   const long = +cfg.ofsLongM, lat = +cfg.ofsLatM, vert = +cfg.ofsVertM;
   const horizontalMag = Math.sqrt(long * long + lat * lat);
@@ -52,24 +61,48 @@ export function validateConfig(cfg) {
   const gvarFields = [
     ['statusGvarIndex', 'Status'], ['conditionFlagsGvarIndex', 'Condition Flags'],
     ['targetSpeedGvarIndex', 'Target Speed'], ['autothrottleEngageGvarIndex', 'Autothrottle Engage'],
-  ].filter(([k]) => cfg[k] !== -1);
-  for (let i = 0; i < gvarFields.length; i++) {
-    for (let j = i + 1; j < gvarFields.length; j++) {
-      if (cfg[gvarFields[i][0]] === cfg[gvarFields[j][0]]) {
-        return { section: 'gvar', message: `${gvarFields[i][1]} and ${gvarFields[j][1]} GVAR indices must be different (or both Disabled)` };
+  ];
+  for (const [k, label] of gvarFields) {
+    if (cfg[k] !== -1 && (cfg[k] < -1 || cfg[k] > 7)) {
+      return { section: 'gvar', message: `${label} GVAR Index must be -1 (Disabled) or 0-7` };
+    }
+  }
+  const assignedGvarFields = gvarFields.filter(([k]) => cfg[k] !== -1);
+  for (let i = 0; i < assignedGvarFields.length; i++) {
+    for (let j = i + 1; j < assignedGvarFields.length; j++) {
+      if (cfg[assignedGvarFields[i][0]] === cfg[assignedGvarFields[j][0]]) {
+        return { section: 'gvar', message: `${assignedGvarFields[i][1]} and ${assignedGvarFields[j][1]} GVAR indices must be different (or both Disabled)` };
       }
     }
   }
 
-  const rcChannels = [cfg.rcLongChannel, cfg.rcLatChannel, cfg.rcVertChannel].filter(c => c !== -1);
+  const rcAxisFields = [
+    ['rcLongChannel', 'Longitudinal'], ['rcLatChannel', 'Lateral'], ['rcVertChannel', 'Vertical'],
+  ];
+  for (const [k, label] of rcAxisFields) {
+    if (cfg[k] !== -1 && (cfg[k] < 1 || cfg[k] > MSP_MAX_SUPPORTED_CHANNELS)) {
+      return { section: 'rc', message: `${label} Channel must be -1 (Disabled) or 1-${MSP_MAX_SUPPORTED_CHANNELS}` };
+    }
+  }
+  const rcChannels = rcAxisFields.map(([k]) => cfg[k]).filter(c => c !== -1);
   if (new Set(rcChannels).size !== rcChannels.length) {
     return { section: 'rc', message: 'Each RC axis must use a different channel (or Disabled)' };
+  }
+  if (cfg.autothrottleEnableRcChannel !== -1 &&
+      (cfg.autothrottleEnableRcChannel < 1 || cfg.autothrottleEnableRcChannel > MSP_MAX_SUPPORTED_CHANNELS)) {
+    return { section: 'autothrottle', message: `Arm Channel must be -1 (Disabled) or 1-${MSP_MAX_SUPPORTED_CHANNELS}` };
   }
   if (cfg.autothrottleEnableRcChannel !== -1 && rcChannels.includes(cfg.autothrottleEnableRcChannel)) {
     return { section: 'autothrottle', message: 'Autothrottle Arm Channel must be different from the RC axis channels (or Disabled)' };
   }
   if (cfg.autothrottleEnableMaxThresholdUs <= cfg.autothrottleEnableMinThresholdUs) {
     return { section: 'autothrottle', message: 'Autothrottle Arm Range Max must be greater than Min' };
+  }
+  if (!(cfg.maxTargetSpeedMps > cfg.minTargetSpeedMps) || cfg.minTargetSpeedMps < 0) {
+    return { section: 'autothrottle', message: 'Max Target Speed must be > Min Target Speed >= 0' };
+  }
+  if (cfg.speedCorrectionAccelCmS2 < 0) {
+    return { section: 'autothrottle', message: 'Slot-Lag Correction Accel must be >= 0' };
   }
   return null;
 }

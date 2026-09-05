@@ -647,7 +647,13 @@ In the **Speed Autothrottle (Fixed-Wing)** section of the Follow panel, set:
   falls inside **Arm Range Min**/**Arm Range Max** (µs) — a range, not a
   single threshold, so it can describe a 2-way switch (wide range covering
   the whole high half of travel), a 3-way switch, or a specific position on a
-  6-pos switch, whichever you've physically wired.
+  6-pos switch, whichever you've physically wired. Assigning an Arm Channel
+  means you intend to use autothrottle, so the panel will also require you to
+  explicitly fill in **Min Target Speed**/**Max Target Speed** below (see
+  next bullet) — the firmware refuses to save an Arm Channel alongside their
+  `0` defaults, so you can't accidentally arm the feature when you haven't 
+  set a speed range. No default is provided because it can vary significantly
+  from aircraft to aircraft.
 - **Slot-Lag Correction Accel** — max closing acceleration/deceleration (in
   cm/s²) used to speed up/slow down beyond the leader's raw ground speed and
   correct for lagging or leading the follow slot. This follows a kinematic
@@ -660,11 +666,17 @@ In the **Speed Autothrottle (Fixed-Wing)** section of the Follow panel, set:
   once and have a specific lag/lead behavior you want to tighten up; higher
   values catch up faster but brake harder right before reaching the slot.
 - **Min Target Speed** / **Max Target Speed** — hard floor/ceiling on the
-  commanded speed, in m/s. **Min Target Speed is this feature's only
-  stall-safety mechanism** — there is no dynamic sink-rate/rescue correction.
-  Set it comfortably above this airframe's actual stall speed; roughly a
-  third above stall is a reasonable starting point, not a validated number
-  for your specific airframe.
+  commanded speed, in m/s (the panel also shows the equivalent mph/km/h next
+  to each field as a reference while you type). Both default to `0` and
+  **must** be explicitly set once an Arm Channel is assigned — `0` is not a
+  usable value, it's a deliberate placeholder forcing you to enter numbers
+  for your specific airframe rather than inherit a default tuned for someone
+  else's. **Min Target Speed is this feature's only stall-safety mechanism**
+  — there is no dynamic sink-rate/rescue correction. Set it comfortably above
+  this airframe's actual stall speed; roughly a third above stall is a
+  reasonable starting point, not a validated number for your specific
+  airframe. If Arm Channel is left `Disabled`, these two fields are ignored
+  entirely and can stay at their `0` defaults.
 
 If the follower FC isn't currently reporting an airplane mixer, the two GVAR
 dropdowns and the tuning fields grey out with an explanatory tip — this is
@@ -849,8 +861,8 @@ to change settings.
 | `autothrottleEnableMinThresholdUs` | number | Lower bound (µs) of the arm switch's "armed" pulse-width range |
 | `autothrottleEnableMaxThresholdUs` | number | Upper bound (µs) of the arm switch's "armed" pulse-width range |
 | `speedCorrectionAccelCmS2` | number | Slot-lag correction: max closing acceleration/deceleration, cm/s² — `0` is pure feedforward (mirror the leader's speed) |
-| `minTargetSpeedMps` | number | Lower clamp on the commanded autothrottle speed setpoint, m/s |
-| `maxTargetSpeedMps` | number | Upper clamp on the commanded autothrottle speed setpoint, m/s |
+| `minTargetSpeedMps` | number | Lower clamp on the commanded autothrottle speed setpoint, m/s. Defaults to `0` (invalid on its own) and must be explicitly set > `0` once `autothrottleEnableRcChannel` is assigned |
+| `maxTargetSpeedMps` | number | Upper clamp on the commanded autothrottle speed setpoint, m/s. Defaults to `0` and must be explicitly set > `minTargetSpeedMps` once `autothrottleEnableRcChannel` is assigned |
 | `debug` | boolean | RAM-only debug-GVAR toggle; always reports `false` after a reboot, never persisted |
 
 Example:
@@ -882,8 +894,8 @@ Example:
   "autothrottleEnableMinThresholdUs": 1700,
   "autothrottleEnableMaxThresholdUs": 2100,
   "speedCorrectionAccelCmS2": 0,
-  "minTargetSpeedMps": 5,
-  "maxTargetSpeedMps": 30,
+  "minTargetSpeedMps": 0,
+  "maxTargetSpeedMps": 0,
   "debug": false
 }
 ```

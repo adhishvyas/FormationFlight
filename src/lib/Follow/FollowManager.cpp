@@ -1013,9 +1013,15 @@ bool FollowManager::applyConfig(const FollowRuntimeConfig &newConfig, String *er
         return false;
     }
 
-    if (newConfig.maxTargetSpeedMps <= newConfig.minTargetSpeedMps || newConfig.minTargetSpeedMps < 0)
+    // Only matters once a pilot has actually wired up an arm channel --
+    // i.e. intends to use autothrottle. Left gated behind that so the
+    // compiled-in 0/0 defaults (an invalid range on their own) can sit
+    // there un-configured until the pilot explicitly enters both values
+    // for their specific airframe.
+    if (newConfig.autothrottleEnableRcChannel != -1 &&
+        (newConfig.minTargetSpeedMps <= 0 || newConfig.maxTargetSpeedMps <= newConfig.minTargetSpeedMps))
     {
-        *errMsg = "maxTargetSpeedMps must be > minTargetSpeedMps >= 0";
+        *errMsg = "minTargetSpeedMps must be > 0 and maxTargetSpeedMps must be > minTargetSpeedMps when autothrottleEnableRcChannel is set";
         return false;
     }
     if (newConfig.speedCorrectionAccelCmS2 < 0)

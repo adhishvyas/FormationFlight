@@ -12,7 +12,7 @@
     "targetSpeedGvarIndex": -1, "autothrottleEngageGvarIndex": -1,
     "autothrottleEnableRcChannel": -1,
     "autothrottleEnableMinThresholdUs": 1700, "autothrottleEnableMaxThresholdUs": 2100,
-    "speedCorrectionAccelCmS2": 0, "minTargetSpeedMps": 5.0, "maxTargetSpeedMps": 30.0
+    "speedCorrectionAccelCmS2": 0, "minTargetSpeedMps": 0.0, "maxTargetSpeedMps": 0.0
   },
 
   "cases": [
@@ -91,9 +91,33 @@
     },
     {
       "name": "max_target_speed_not_greater_than_min_fails",
-      "overrides": { "minTargetSpeedMps": 10, "maxTargetSpeedMps": 10 },
+      "overrides": { "autothrottleEnableRcChannel": 6, "minTargetSpeedMps": 10, "maxTargetSpeedMps": 10 },
       "expectValid": false,
-      "note": "Previously follow-logic.js never checked maxTargetSpeedMps > minTargetSpeedMps >= 0 at all. Fixed by adding the same check as C++/Python to validateConfig()."
+      "note": "Previously follow-logic.js never checked maxTargetSpeedMps > minTargetSpeedMps >= 0 at all. Fixed by adding the same check as C++/Python to validateConfig(). Arm channel must be set here or the check is skipped entirely (see the armed/disarmed cases below)."
+    },
+    {
+      "name": "target_speed_zero_defaults_valid_when_disarmed",
+      "overrides": {},
+      "expectValid": true,
+      "note": "Same as baseline_is_valid -- the compiled-in 0/0 target-speed defaults are only invalid once the pilot arms autothrottle (autothrottleEnableRcChannel != -1); with the arm channel left Disabled (-1, the baseline default) they don't matter at all."
+    },
+    {
+      "name": "target_speed_zero_defaults_fail_when_armed",
+      "overrides": { "autothrottleEnableRcChannel": 6 },
+      "expectValid": false,
+      "note": "Setting an arm channel means the pilot intends to use autothrottle, so the 0/0 target-speed defaults (an invalid range on their own) must now be explicitly overridden with values sane for this airframe."
+    },
+    {
+      "name": "min_target_speed_zero_fails_when_armed",
+      "overrides": { "autothrottleEnableRcChannel": 6, "minTargetSpeedMps": 0, "maxTargetSpeedMps": 10 },
+      "expectValid": false,
+      "note": "minTargetSpeedMps must be explicitly > 0 when armed, not just left at its 0 default while only maxTargetSpeedMps is edited -- min is the feature's only stall-safety floor."
+    },
+    {
+      "name": "target_speed_explicit_values_valid_when_armed",
+      "overrides": { "autothrottleEnableRcChannel": 6, "minTargetSpeedMps": 5, "maxTargetSpeedMps": 30 },
+      "expectValid": true,
+      "note": "Both values explicitly set for this airframe and the arm channel assigned -- the intended, fully-configured state."
     },
     {
       "name": "speed_correction_accel_negative_fails",

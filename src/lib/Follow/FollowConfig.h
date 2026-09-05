@@ -190,10 +190,14 @@ enum FollowHeadingMode {
 // m/s. This clamp floor is the feature's only stall-safety mechanism this
 // iteration — set it with real margin above the airframe's
 // actual stall speed (roughly a third above stall is a reasonable starting
-// point), since there is no dynamic sink-rate protection yet.
+// point), since there is no dynamic sink-rate protection yet. Defaults to 0
+// (an invalid range on its own) rather than a number tuned for someone
+// else's airframe: applyConfig() requires the pilot to explicitly enter both
+// values before the arm channel can be assigned, so autothrottle can never
+// engage on an un-reviewed default.
 #ifndef FOLLOW_MIN_TARGET_SPEED_MPS
-#define FOLLOW_MIN_TARGET_SPEED_MPS 5.0
+#define FOLLOW_MIN_TARGET_SPEED_MPS 0.0
 #endif
 #ifndef FOLLOW_MAX_TARGET_SPEED_MPS
-#define FOLLOW_MAX_TARGET_SPEED_MPS 30.0
+#define FOLLOW_MAX_TARGET_SPEED_MPS 0.0
 #endif

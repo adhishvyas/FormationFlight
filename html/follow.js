@@ -10,8 +10,9 @@ const ENDPOINT_PREFIX = window.location.host != "192.168.4.1" ? "http://192.168.
 // wire; these never leave the browser and are never sent back on save.
 const M_TO_FT = 3.28084;
 const MPS_TO_MPH = 2.23694;
+const MPS_TO_KMH = 3.6;
 const asFt = m => `≈ ${(+m * M_TO_FT).toFixed(1)} ft`;
-const asMph = mps => `≈ ${(+mps * MPS_TO_MPH).toFixed(1)} mph`;
+const asMph = mps => `≈ ${(+mps * MPS_TO_MPH).toFixed(1)} mph / ${(+mps * MPS_TO_KMH).toFixed(1)} km/h`;
 
 const lockStateColors = {
   IDLE: tipColors.gray,

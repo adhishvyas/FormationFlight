@@ -97,8 +97,12 @@ export function validateConfig(cfg) {
   if (cfg.autothrottleEnableMaxThresholdUs <= cfg.autothrottleEnableMinThresholdUs) {
     return { section: 'autothrottle', message: 'Autothrottle Arm Range Max must be greater than Min' };
   }
-  if (!(cfg.maxTargetSpeedMps > cfg.minTargetSpeedMps) || cfg.minTargetSpeedMps < 0) {
-    return { section: 'autothrottle', message: 'Max Target Speed must be > Min Target Speed >= 0' };
+  // Only matters once the pilot has assigned an arm channel -- i.e.
+  // intends to use autothrottle. The 0/0 defaults are an invalid range on
+  // their own so they can sit un-configured until then.
+  if (cfg.autothrottleEnableRcChannel !== -1 &&
+      (!(cfg.minTargetSpeedMps > 0) || !(cfg.maxTargetSpeedMps > cfg.minTargetSpeedMps))) {
+    return { section: 'autothrottle', message: 'Min Target Speed must be > 0 and Max Target Speed must be > Min Target Speed when Arm Channel is set' };
   }
   if (cfg.speedCorrectionAccelCmS2 < 0) {
     return { section: 'autothrottle', message: 'Slot-Lag Correction Accel must be >= 0' };

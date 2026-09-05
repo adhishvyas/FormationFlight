@@ -61,7 +61,7 @@ DEFAULT_CONFIG = {
     "targetSpeedGvarIndex": -1, "autothrottleEngageGvarIndex": -1,
     "autothrottleEnableRcChannel": -1,
     "autothrottleEnableMinThresholdUs": 1700, "autothrottleEnableMaxThresholdUs": 2100,
-    "speedCorrectionAccelCmS2": 0, "minTargetSpeedMps": 5.0, "maxTargetSpeedMps": 30.0,
+    "speedCorrectionAccelCmS2": 0, "minTargetSpeedMps": 0.0, "maxTargetSpeedMps": 0.0,
     "debug": False,
 }
 CONFIG = copy.deepcopy(DEFAULT_CONFIG)
@@ -325,8 +325,8 @@ def validate_config(cfg):
     if cfg.get("autothrottleEnableMaxThresholdUs", 0) <= cfg.get("autothrottleEnableMinThresholdUs", 0):
         return "autothrottleEnableMaxThresholdUs must be > autothrottleEnableMinThresholdUs"
 
-    if cfg.get("maxTargetSpeedMps", 0) <= cfg.get("minTargetSpeedMps", 0) or cfg.get("minTargetSpeedMps", 0) < 0:
-        return "maxTargetSpeedMps must be > minTargetSpeedMps >= 0"
+    if art != -1 and (cfg.get("minTargetSpeedMps", 0) <= 0 or cfg.get("maxTargetSpeedMps", 0) <= cfg.get("minTargetSpeedMps", 0)):
+        return "minTargetSpeedMps must be > 0 and maxTargetSpeedMps must be > minTargetSpeedMps when autothrottleEnableRcChannel is set"
     if cfg.get("speedCorrectionAccelCmS2", 0) < 0:
         return "speedCorrectionAccelCmS2 must be >= 0"
 

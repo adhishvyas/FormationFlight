@@ -97,6 +97,8 @@ void test_engage_gate_false_when_arm_channel_outside_range()
 
     FollowRuntimeConfig cfg = fm.getConfig();
     cfg.autothrottleEnableRcChannel = 6;
+    cfg.minTargetSpeedMps = 5;
+    cfg.maxTargetSpeedMps = 30;
     String err;
     TEST_ASSERT_TRUE(fm.applyConfig(cfg, &err));
     msp.rcChannelUs[6] = 1000; // below default min threshold (1700)
@@ -149,6 +151,13 @@ void test_zero_accel_is_pure_feedforward()
     FollowManager fm(&msp, &gnss, &peers);
     msp.gcsNavActive = true;
     msp.platformType = INAV_PLATFORM_AIRPLANE;
+
+    FollowRuntimeConfig cfg = fm.getConfig();
+    cfg.minTargetSpeedMps = 5; // wide enough clamp that this test's speeds pass through unclamped
+    cfg.maxTargetSpeedMps = 30;
+    String err;
+    TEST_ASSERT_TRUE(fm.applyConfig(cfg, &err));
+
     setupWithAlongTrackError(peers, gnss, /*groundSpeedMs=*/15.0, /*alongTrackErrorM=*/40.0);
     // speedCorrectionAccelCmS2 defaults to 0.
 
@@ -169,6 +178,8 @@ void test_positive_error_adds_correction_negative_subtracts()
 
     FollowRuntimeConfig cfg = fm.getConfig();
     cfg.speedCorrectionAccelCmS2 = 50;
+    cfg.minTargetSpeedMps = 5; // wide enough clamp that this test's speeds pass through unclamped
+    cfg.maxTargetSpeedMps = 30;
     String err;
     TEST_ASSERT_TRUE(fm.applyConfig(cfg, &err));
 
@@ -201,19 +212,21 @@ void test_target_speed_clamps_to_max_and_min()
     FollowRuntimeConfig cfg = fm.getConfig();
     cfg.speedCorrectionAccelCmS2 = 50;
     cfg.maxTargetDistM = 1000.0; // wide enough that a 300m along-track error isn't itself suppressed
+    cfg.minTargetSpeedMps = 5;
+    cfg.maxTargetSpeedMps = 30;
     String err;
     TEST_ASSERT_TRUE(fm.applyConfig(cfg, &err));
 
     // a=50 cm/s^2, d=300m -> errorCm=30000 -> correction = sqrt(2*50*30000)
     // = sqrt(3,000,000) ~= 1732 cm/s -> 1500+1732 = 3232, well past
-    // maxTargetSpeedMps (default 30 m/s = 3000 cm/s).
+    // maxTargetSpeedMps (30 m/s = 3000 cm/s, set above).
     setupWithAlongTrackError(peers, gnss, 15.0, 300.0);
     followTick(fm);
     DynamicJsonDocument doc1(1024);
     fm.statusJson(&doc1);
     TEST_ASSERT_EQUAL_INT32(3000, doc1["targetSpeedCmS"].as<int32_t>());
 
-    // Mirrored: 1500-1732 clamps to minTargetSpeedMps (default 5 m/s = 500 cm/s).
+    // Mirrored: 1500-1732 clamps to minTargetSpeedMps (5 m/s = 500 cm/s, set above).
     setupWithAlongTrackError(peers, gnss, 15.0, -300.0);
     followTick(fm);
     DynamicJsonDocument doc2(1024);
@@ -251,6 +264,8 @@ void test_autothrottle_armed_when_assigned_channel_read_fails()
 
     FollowRuntimeConfig cfg = fm.getConfig();
     cfg.autothrottleEnableRcChannel = 6;
+    cfg.minTargetSpeedMps = 5;
+    cfg.maxTargetSpeedMps = 30;
     String err;
     TEST_ASSERT_TRUE(fm.applyConfig(cfg, &err));
     // Channel 6 deliberately absent from msp.rcChannelUs.
@@ -272,6 +287,8 @@ void test_autothrottle_armed_only_within_threshold_range()
 
     FollowRuntimeConfig cfg = fm.getConfig();
     cfg.autothrottleEnableRcChannel = 6; // default range [1700, 2100]
+    cfg.minTargetSpeedMps = 5;
+    cfg.maxTargetSpeedMps = 30;
     String err;
     TEST_ASSERT_TRUE(fm.applyConfig(cfg, &err));
 

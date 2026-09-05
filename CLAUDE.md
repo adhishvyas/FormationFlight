@@ -27,7 +27,7 @@ changes, on-device or the web UI mock server below.
 
 `html/` is a no-build-step Preact+htm app served by the firmware's AsyncWebServer at `192.168.4.1`.
 To preview/test UI changes locally without hardware, use the `web-ui-preview` skill, which runs
-`.claude/skills/web-ui-preview/mock_server.py` — a mock backend that serves `html/` as-is and fakes
+`scripts/mock_server.py` — a mock backend that serves `html/` as-is and fakes
 the REST endpoints. See that skill's notes: the mock's `validate_config()` is a hand-maintained
 mirror of `FollowManager::applyConfig()` and its `DEFAULT_CONFIG` mirrors `configJson()` — keep
 both in sync when touching Follow config fields.

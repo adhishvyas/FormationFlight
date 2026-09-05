@@ -13,14 +13,15 @@ as a local file, and `window.location.host` won't equal `192.168.4.1` when
 served locally, so `main.js`'s hardcoded `ENDPOINT_PREFIX` would otherwise
 send every fetch to a real device that isn't there.
 
-This skill starts a small Python mock backend (`mock_server.py`, alongside
-this file) that serves `html/` directly and fakes those endpoints well
-enough to review UI changes in a real browser.
+This skill starts a small Python mock backend (`scripts/mock_server.py`,
+shared with the project's test suite — see `test/test_mock_server.py`) that
+serves `html/` directly and fakes those endpoints well enough to review UI
+changes in a real browser.
 
 ## Run it
 
 ```bash
-python3 .claude/skills/web-ui-preview/mock_server.py [--port 8731]
+python3 scripts/mock_server.py [--port 8731]
 ```
 
 Run it in the background (e.g. Bash tool's `run_in_background`, or `&` in a

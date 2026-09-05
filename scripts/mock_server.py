@@ -11,7 +11,7 @@ call, including a stateful GET/POST /followmanager/config that round-trips
 the same way FollowManager::applyConfig()/configJson() do on real firmware.
 
 Usage:
-    python3 .claude/skills/web-ui-preview/mock_server.py [--port 8731]
+    python3 scripts/mock_server.py [--port 8731]
 
 Then open http://127.0.0.1:<port>/#/follow (or just / for the dashboard).
 """

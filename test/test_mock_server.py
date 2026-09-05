@@ -8,18 +8,18 @@ three mirrors in sync.
 Stdlib unittest only (no pytest in this environment, and the project has
 no Python test infra to build on yet) -- run with:
 
-    python3 .claude/skills/web-ui-preview/test_mock_server.py
+    python3 test/test_mock_server.py
 """
 import json
 import os
 import sys
 import unittest
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))
 from mock_server import validate_config
 
 FIXTURE_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "..", "..",
+    os.path.dirname(os.path.abspath(__file__)), "..",
     "docs", "spec", "fixtures", "follow-config-cases.json",
 )
 

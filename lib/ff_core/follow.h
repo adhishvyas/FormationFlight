@@ -320,6 +320,12 @@ struct FollowStatus {
     bool havePreArmCandidateOffset = false;
     FollowOffset preArmCandidateOffset{};
     bool rcPreArmCheckFailed = false;
+
+    // Position filter warm-up (docs/spec/2026-09-14-FollowPositionFiltering.md).
+    // Always present, unlike the haveLastTarget-gated fields above -- "is the
+    // filter warmed up" is meaningful even before a target has been solved.
+    bool leaderFilterInitialized = false;
+    bool selfFilterInitialized = false;
 };
 
 const char* followLockStateName(FollowLockState s);

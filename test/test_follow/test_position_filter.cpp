@@ -312,3 +312,167 @@ void test_point_leader_heading_stability_under_self_position_jitter() {
     TEST_ASSERT_TRUE_MESSAGE(filteredVariance < rawVariance * 0.6,
                              "filtered POINT_LEADER heading should be materially smoother");
 }
+
+// ---- D: cross-cutting acceptance ----
+
+// spec SS9.1.2: positionFilterEnabled = false must reproduce the pre-filter
+// target/course/heading/altitude output bit-for-bit against the same spoofed
+// input -- guaranteed by construction per SS5's hard-branch disabled-path
+// design (service() falls straight through to the raw peer/self reads
+// without ever touching the filters), but asserted directly here since this
+// feature ships enabled by default, changing existing installs' live
+// behavior the moment it's flashed.
+void test_disabled_filter_reproduces_raw_target_course_heading_alt_exactly() {
+    const double baseLat = 37.0;
+    const double baseLon = -122.0;
+    const double courseDeg = 90.0;
+    const double driftSpeedMps = 0.5;      // actual position drift, slow and smooth
+    const double reportedSpeedMps = 10.0;  // above minCourseSpeed
+    const double stepS = 0.3;              // matches FollowHarness::tick()'s 300ms step
+    const double noiseAmplitudeM = 2.0;
+    const int kSteps = 40;
+
+    FollowHarness h;
+    h.fc.gcsNav = true;
+    h.fc.headingHold = true;
+    FollowConfig cfg = configOf(h);
+    cfg.positionFilterEnabled = false;
+    cfg.headingMode = FOLLOW_HEADING_COURSE;
+    const char* err = nullptr;
+    TEST_ASSERT_TRUE(h.apply(cfg, &err));
+    h.self.set(baseLat, baseLon);
+
+    double lat = baseLat;
+    double lon = baseLon;
+    for (int i = 0; i < kSteps; i++) {
+        double nextLat, nextLon;
+        geo::pointAtDistance(lat, lon, driftSpeedMps * stepS, courseDeg, nextLat, nextLon);
+        lat = nextLat;
+        lon = nextLon;
+
+        double noisyLat, noisyLon;
+        jitterPoint(lat, lon, static_cast<uint32_t>(i), noiseAmplitudeM, &noisyLat, &noisyLon);
+
+        h.setPeer(/*uid=*/1, noisyLat, noisyLon, reportedSpeedMps, courseDeg);
+        h.tick();
+
+        const FollowStatus s = h.status();
+        TEST_ASSERT_TRUE_MESSAGE(s.haveLastTarget, "target suppressed mid-run");
+        TEST_ASSERT_FALSE_MESSAGE(s.leaderFilterInitialized, "leader filter must stay untouched when disabled");
+        TEST_ASSERT_FALSE_MESSAGE(s.selfFilterInitialized, "self filter must stay untouched when disabled");
+
+        // Recompute the pre-filter raw-path formula directly from the same
+        // spoofed peer/self inputs service() just consumed, independent of
+        // FollowController.
+        const int32_t peerLat1e7 = static_cast<int32_t>(std::lround(noisyLat * 1e7));
+        const int32_t peerLon1e7 = static_cast<int32_t>(std::lround(noisyLon * 1e7));
+        const FollowTarget expectedTarget =
+            slotToLatLon(peerLat1e7, peerLon1e7, courseDeg, cfg.ofsLongM, cfg.ofsLatM);
+        TEST_ASSERT_EQUAL_INT32_MESSAGE(expectedTarget.lat_1e7, s.lastTarget.lat_1e7,
+                                       "target lat diverged from the raw (pre-filter) formula");
+        TEST_ASSERT_EQUAL_INT32_MESSAGE(expectedTarget.lon_1e7, s.lastTarget.lon_1e7,
+                                       "target lon diverged from the raw (pre-filter) formula");
+
+        const double relAltM = 0.0;  // peer.alt_m == self.alt_m == 0 throughout this scenario
+        const double altCmD =
+            static_cast<double>(h.fc.altitudeCm) + relAltM * 100.0 + cfg.ofsVertM * 100.0;
+        const int32_t floorCm = static_cast<int32_t>(std::lround(cfg.minAltM * 100.0));
+        int32_t expectedAltCm = static_cast<int32_t>(std::lround(altCmD));
+        if (expectedAltCm < floorCm) expectedAltCm = floorCm;
+        TEST_ASSERT_EQUAL_INT32_MESSAGE(expectedAltCm, s.lastTargetAltCm,
+                                       "altitude diverged from the raw (pre-filter) formula");
+
+        int32_t expectedHeadingDeg = static_cast<int32_t>(std::lround(courseDeg)) % 360;
+        if (expectedHeadingDeg < 0) expectedHeadingDeg += 360;
+        if (expectedHeadingDeg == 0) expectedHeadingDeg = 1;
+        TEST_ASSERT_EQUAL_INT16_MESSAGE(static_cast<int16_t>(expectedHeadingDeg), s.lastTargetHeadingDeg,
+                                       "heading diverged from the raw (pre-filter) formula");
+    }
+}
+
+// spec SS9.1.3: capture must not be gated on the emitHz throttle. Two leader
+// position updates landing inside one emitHz window must each run their own
+// predict/correct step (chained, each over its own short dt) rather than
+// being collapsed into a single step spanning both once the throttle
+// reopens -- the two are not numerically equivalent for this nonlinear
+// recursive filter, so comparing against both hypotheses is the concrete,
+// observable proof that capture isn't gated on the emit throttle.
+void test_capture_runs_unthrottled_between_emit_boundaries() {
+    FollowHarness h;
+    h.fc.gcsNav = true;
+    FollowConfig cfg = configOf(h);
+    cfg.positionFilterEnabled = true;
+    cfg.emitHz = 4;  // 250ms emit period
+    const char* err = nullptr;
+    TEST_ASSERT_TRUE(h.apply(cfg, &err));
+
+    const double baseLat = 37.0;
+    const double baseLon = -122.0;
+    h.self.set(baseLat, baseLon);
+
+    const uint32_t t0 = 100000;
+    h.setPeerAt(/*uid=*/1, baseLat, baseLon, /*speedMs=*/10.0, /*courseDeg=*/90.0, 0, t0);
+    h.ctl.service(t0);
+    TEST_ASSERT_EQUAL(FOLLOW_LOCK_LOCKED, h.ctl.status(t0).state);
+
+    // Two more leader updates, both inside the same 250ms emit window.
+    double latA, lonA;
+    geo::pointAtDistance(baseLat, baseLon, /*distM=*/20.0, /*bearing=*/90.0, latA, lonA);
+    const uint32_t t1 = t0 + 50;
+    h.setPeerAt(1, latA, lonA, 10.0, 90.0, 0, t1);
+    h.ctl.service(t1);  // throttled: no emit, but must still capture (latA, lonA)
+
+    double latB, lonB;
+    geo::pointAtDistance(baseLat, baseLon, /*distM=*/40.0, /*bearing=*/90.0, latB, lonB);
+    const uint32_t t2 = t0 + 150;
+    h.setPeerAt(1, latB, lonB, 10.0, 90.0, 0, t2);
+    h.ctl.service(t2);  // throttled: no emit, but must still capture (latB, lonB)
+
+    const uint32_t t3 = t0 + 250;  // throttle reopens; no further peer update
+    h.ctl.service(t3);
+    const FollowStatus s = h.ctl.status(t3);
+    TEST_ASSERT_TRUE(s.haveLastTarget);
+
+    // Independently replicate both hypotheses with the same pure filter
+    // primitive (follow_filter.h), starting from the same reset state the
+    // controller used at t0's lock.
+    const auto gains = resolveFilterGains(cfg.positionFilterStrengthPct);
+    const int32_t baseLat1e7 = static_cast<int32_t>(std::lround(baseLat * 1e7));
+    const int32_t baseLon1e7 = static_cast<int32_t>(std::lround(baseLon * 1e7));
+    const int32_t latA1e7 = static_cast<int32_t>(std::lround(latA * 1e7));
+    const int32_t lonA1e7 = static_cast<int32_t>(std::lround(lonA * 1e7));
+    const int32_t latB1e7 = static_cast<int32_t>(std::lround(latB * 1e7));
+    const int32_t lonB1e7 = static_cast<int32_t>(std::lround(lonB * 1e7));
+
+    // Fixed/expected behavior: chained -- a step at t1, then a second step at t2.
+    FollowPositionFilter chained;
+    updateFilterPosition(&chained, baseLat1e7, baseLon1e7, 0.0, t0, gains.first, gains.second);
+    updateFilterPosition(&chained, latA1e7, lonA1e7, 0.0, t1, gains.first, gains.second);
+    updateFilterPosition(&chained, latB1e7, lonB1e7, 0.0, t2, gains.first, gains.second);
+    const FollowFilteredLocation chainedLoc = filteredLocation(chained);
+
+    // The bug this phase fixes: a single step straight from t0 to t2's
+    // sample, as if latA/lonA's capture at t1 had never happened (i.e.
+    // capture gated on the same throttle as emission).
+    FollowPositionFilter lumped;
+    updateFilterPosition(&lumped, baseLat1e7, baseLon1e7, 0.0, t0, gains.first, gains.second);
+    updateFilterPosition(&lumped, latB1e7, lonB1e7, 0.0, t2, gains.first, gains.second);
+    const FollowFilteredLocation lumpedLoc = filteredLocation(lumped);
+
+    // The two hypotheses must actually differ, or this test couldn't tell
+    // them apart in the first place.
+    TEST_ASSERT_TRUE_MESSAGE(chainedLoc.lat_1e7 != lumpedLoc.lat_1e7 || chainedLoc.lon_1e7 != lumpedLoc.lon_1e7,
+                             "chained vs lumped hypotheses must diverge for this test to be meaningful");
+
+    // service()'s LIVE-mode anchor is filteredLocation(leaderFilter_) read
+    // straight through to slotToLatLon() -- apply the same transform here so
+    // the comparison is bit-for-bit, not just "in the right neighborhood".
+    const double expectedCourseDeg = filteredCourseDeg(chained);
+    const FollowTarget chainedTarget =
+        slotToLatLon(chainedLoc.lat_1e7, chainedLoc.lon_1e7, expectedCourseDeg, cfg.ofsLongM, cfg.ofsLatM);
+
+    TEST_ASSERT_EQUAL_INT32_MESSAGE(chainedTarget.lat_1e7, s.lastTarget.lat_1e7,
+                                   "target should reflect two chained captures, not one throttled-away step");
+    TEST_ASSERT_EQUAL_INT32_MESSAGE(chainedTarget.lon_1e7, s.lastTarget.lon_1e7,
+                                   "target should reflect two chained captures, not one throttled-away step");
+}

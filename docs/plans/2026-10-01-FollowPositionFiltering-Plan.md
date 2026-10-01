@@ -150,7 +150,7 @@ Depends on: **C1**. Independent of **C2** (different member, different reset rul
 
 ---
 
-## D. Cross-cutting acceptance tests + status/API surface
+## D. Cross-cutting acceptance tests + status/API surface [Completed]
 
 Depends on: **C2**, **C3** (needs both filters fully wired to write the tests that compare whole-feature behavior, and to have something non-trivial to expose in status).
 

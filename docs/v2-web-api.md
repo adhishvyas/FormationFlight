@@ -91,7 +91,8 @@ Everything the dashboard shows. Roughly 2 KB with a full peer table.
     "target_speed_cms": 0, "rc_slot_frozen": false,
     "live_offset": { "long_m": -15, "lat_m": 0, "vert_m": 10 },
     "prearm_failed": false,
-    "prearm_offset": { "long_m": -15, "lat_m": 0, "vert_m": 10 }
+    "prearm_offset": { "long_m": -15, "lat_m": 0, "vert_m": 10 },
+    "leader_filter_initialized": true, "self_filter_initialized": true
   },
   "sim": { "enabled": false, "peers": 0 },
   "power": {
@@ -161,6 +162,12 @@ Absent is not the same as zero, and the firmware omits rather than zero-fills:
 
 `follow.locked_uid` and `follow.locked_name` are always present, reading
 `"00000000"` and `""` when nothing is locked.
+
+`follow.leader_filter_initialized` and `follow.self_filter_initialized` are
+always present (like `gate_active`), reporting whether that position filter
+(docs/spec/2026-09-14-FollowPositionFiltering.md) has seen its first sample
+yet -- meaningful even before a target has been solved. Both read `false`
+when `positionFilterEnabled` is off, since the filters are never fed.
 
 `radios[].sim` marks the virtual radio that simulated traffic arrives on, so the
 UI can make it obvious the numbers are not real RF.

@@ -778,6 +778,11 @@ FollowStatus FollowController::status(uint32_t now_ms) const {
         s.preArmCandidateOffset = preArmCandidateOffset_;
     }
     s.rcPreArmCheckFailed = rcPreArmCheckFailed_;
+
+    // Any one channel is representative -- all three channels of a filter
+    // initialize together (updateFilterPosition() feeds all three per sample).
+    s.leaderFilterInitialized = leaderFilter_.north.initialized;
+    s.selfFilterInitialized = selfFilter_.north.initialized;
     return s;
 }
 

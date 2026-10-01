@@ -403,6 +403,8 @@ void fillStatus(WebDeps& d, JsonObject root) {
         f["autothrottle_armed"] = fs.autothrottleArmed;
         f["rc_slot_frozen"] = fs.rcSlotFrozen;
         f["prearm_failed"] = fs.rcPreArmCheckFailed;
+        f["leader_filter_initialized"] = fs.leaderFilterInitialized;
+        f["self_filter_initialized"] = fs.selfFilterInitialized;
         if (fs.haveLastTarget) {
             JsonObject t = f.createNestedObject("target");
             t["lat"] = fs.lastTarget.lat_1e7;

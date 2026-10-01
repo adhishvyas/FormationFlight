@@ -134,6 +134,8 @@ extern void test_leader_filter_resets_on_relock_not_blended_with_previous_peer()
 extern void test_filtered_course_minCourseSpeed_fallback_holds_last_course();
 extern void test_self_position_noise_rejection_reduces_autothrottle_jitter();
 extern void test_point_leader_heading_stability_under_self_position_jitter();
+extern void test_disabled_filter_reproduces_raw_target_course_heading_alt_exactly();
+extern void test_capture_runs_unthrottled_between_emit_boundaries();
 
 int main(int, char**) {
     UNITY_BEGIN();
@@ -250,6 +252,8 @@ int main(int, char**) {
     RUN_TEST(test_filtered_course_minCourseSpeed_fallback_holds_last_course);
     RUN_TEST(test_self_position_noise_rejection_reduces_autothrottle_jitter);
     RUN_TEST(test_point_leader_heading_stability_under_self_position_jitter);
+    RUN_TEST(test_disabled_filter_reproduces_raw_target_course_heading_alt_exactly);
+    RUN_TEST(test_capture_runs_unthrottled_between_emit_boundaries);
 
     return UNITY_END();
 }

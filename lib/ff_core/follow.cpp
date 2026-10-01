@@ -297,6 +297,7 @@ const Peer* FollowController::resolveLock(uint32_t now_ms) {
         std::strncpy(lockedName_, candidate->name, sizeof(lockedName_) - 1);
         lockedName_[sizeof(lockedName_) - 1] = '\0';
         state_ = FOLLOW_LOCK_LOCKED;
+        resetLeaderFilter();
         return candidate;
     }
 
@@ -327,6 +328,25 @@ void FollowController::forceReacquire() {
     state_ = FOLLOW_LOCK_ACQUIRING;
     lockedUid_ = 0;
     lockedName_[0] = '\0';
+    resetLeaderFilter();
+}
+
+void FollowController::resetLeaderFilter() { leaderFilter_ = FollowPositionFilter(); }
+
+void FollowController::updateLeaderFilter(const Peer* peer, uint32_t now_ms) {
+    const auto gains = resolveFilterGains(config_.positionFilterStrengthPct);
+    updateFilterPosition(&leaderFilter_, peer->lat, peer->lon,
+                         static_cast<double>(peer->alt_m), now_ms, gains.first, gains.second);
+}
+
+void FollowController::updateSelfFilter(uint32_t now_ms) {
+    const NodeLocation loc = self_->getLocation();
+    if (!loc.valid) {
+        return;
+    }
+    const auto gains = resolveFilterGains(config_.positionFilterStrengthPct);
+    updateFilterPosition(&selfFilter_, loc.lat, loc.lon, static_cast<double>(loc.alt_m), now_ms,
+                         gains.first, gains.second);
 }
 
 double FollowController::resolveCourseDeg(const Peer* peer) {
@@ -471,17 +491,42 @@ bool FollowController::targetTooFar(const FollowTarget& target, const NodeLocati
 }
 
 void FollowController::service(uint32_t now_ms) {
-    if (started_ && static_cast<int32_t>(now_ms - nextRunMs_) < 0) {
-        return;
-    }
-    started_ = true;
-    nextRunMs_ = now_ms + (1000u / config_.emitHz);
-
     // Tell the FC adapter what polled telemetry this cycle's config needs, so an
     // idle Follow costs no MSP_ALTITUDE / MSP_RC traffic.
     const bool gateActive = followSwitchActive();
     fc_->setTelemetryNeeds(gateActive,
                            anyRcChannelAssigned() || config_.autothrottleEnableRcChannel >= 1);
+
+    // Capture step (docs/spec/2026-09-14-FollowPositionFiltering.md SS4): runs
+    // on every service() call, not gated on the nextRunMs_ throttle below --
+    // otherwise two leader position updates landing inside one emitHz window
+    // would have the earlier one silently clobbered before either filter ever
+    // saw it. Capture itself still only runs while the follow switch is
+    // active (acquisition never starts without it, same as before); the self
+    // filter runs regardless of switch/lock state, since our own position is
+    // continuous either way.
+    const Peer* peer = nullptr;
+    if (!gateActive) {
+        state_ = FOLLOW_LOCK_IDLE;
+        lockedUid_ = 0;
+        lockedName_[0] = '\0';
+        haveValidCourse_ = false;
+        resetLeaderFilter();
+    } else {
+        peer = resolveLock(now_ms);
+        if (peer != nullptr && config_.positionFilterEnabled) {
+            updateLeaderFilter(peer, now_ms);
+        }
+    }
+    if (config_.positionFilterEnabled) {
+        updateSelfFilter(now_ms);
+    }
+
+    if (started_ && static_cast<int32_t>(now_ms - nextRunMs_) < 0) {
+        return;
+    }
+    started_ = true;
+    nextRunMs_ = now_ms + (1000u / config_.emitHz);
 
     // Every early-exit path below reports the same way: no waypoint this cycle,
     // autothrottle GVARs to their disengaged state, status GVARs to the
@@ -507,16 +552,11 @@ void FollowController::service(uint32_t now_ms) {
     }
 
     if (!gateActive) {
-        state_ = FOLLOW_LOCK_IDLE;
-        lockedUid_ = 0;
-        lockedName_[0] = '\0';
-        haveValidCourse_ = false;
         bail(rcPreArmCheckFailed_ ? FOLLOW_CONDITION_RC_INVALID_GAP_SETTINGS
                                   : FOLLOW_CONDITION_NONE);
         return;
     }
 
-    const Peer* peer = resolveLock(now_ms);
     if (peer == nullptr) {
         bail(FOLLOW_CONDITION_NONE);
         return;  // ACQUIRING or LOCKED_HOLDING this cycle -- nothing to emit

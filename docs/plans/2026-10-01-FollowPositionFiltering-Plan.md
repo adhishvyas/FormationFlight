@@ -95,7 +95,7 @@ Depends on: nothing. Independent of **A** — this is plumbing and a validation 
 
 ---
 
-## C1. Capture/emit decoupling scaffold
+## C1. Capture/emit decoupling scaffold [Completed]
 
 Depends on: **A** (needs `FollowPositionFilter` to declare the two new members, even before they're meaningfully wired), **B** (needs `positionFilterEnabled` to gate the new capture calls).
 

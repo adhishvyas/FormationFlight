@@ -25,6 +25,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "follow_filter.h"
 #include "msp_fc.h"
 #include "node.h"
 
@@ -374,6 +375,14 @@ private:
     bool followSwitchActive() const;
     const Peer* resolveLock(uint32_t now_ms);
     void forceReacquire();
+    // Position/velocity filtering (docs/spec/2026-09-14-FollowPositionFiltering.md).
+    // Capture runs unconditionally every service() call, decoupled from
+    // emitHz -- see service()'s own comments for why. resetLeaderFilter()'s
+    // three call sites are resolveLock()'s ACQUIRING->LOCKED transition,
+    // forceReacquire(), and service()'s gate-inactive branch (spec SS3.2).
+    void resetLeaderFilter();
+    void updateLeaderFilter(const Peer* peer, uint32_t now_ms);
+    void updateSelfFilter(uint32_t now_ms);
     FollowOffset resolveOffset();
     double resolveAxisOffset(double configuredM, int16_t channel1Based) const;
     FollowOffset resolveCandidateOffset() const;
@@ -404,6 +413,9 @@ private:
     char lockedName_[kMaxNameLen + 1] = {0};
     double lastValidCourseDeg_ = 0.0;
     bool haveValidCourse_ = false;
+
+    FollowPositionFilter leaderFilter_;
+    FollowPositionFilter selfFilter_;
 
     bool haveLastTarget_ = false;
     FollowTarget lastTarget_{};

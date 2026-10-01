@@ -249,3 +249,51 @@ void test_peer_without_fix_is_not_followable()
     TEST_ASSERT_EQUAL(FOLLOW_LOCK_LOCKED_HOLDING, h.status().state);
     TEST_ASSERT_EQUAL(1, (int)h.fc.sentWaypoints.size());
 }
+
+// ---- Capture/emit decoupling (docs/spec/2026-09-14-FollowPositionFiltering.md
+// SS4): resolveLock() and the gate-inactive reset must run on every
+// service() call, not just the ones that clear the emitHz throttle. These
+// call service() directly at a sub-emitHz cadence (FollowHarness::tick()'s
+// fixed 300ms step always clears the default 250ms throttle, so it can't
+// exercise this). ----
+
+void test_resolveLock_runs_on_every_call_even_inside_the_emitHz_throttle_window() {
+    FollowHarness h;
+    h.fc.gcsNav = true;
+
+    // First-ever call is never throttled (started_ starts false) -- this just
+    // seeds nextRunMs_ and establishes the ACQUIRING baseline.
+    h.ctl.service(h.now);
+    TEST_ASSERT_EQUAL(FOLLOW_LOCK_ACQUIRING, h.status().state);
+
+    // A peer shows up and service() is called again 10ms later -- well inside
+    // the 250ms emitHz period a throttled resolveLock() would have skipped.
+    // The lock must still progress to LOCKED on this very call.
+    h.now += 10;
+    h.setPeer(/*uid=*/1, 37.0, -122.0, 10.0, 0.0);
+    h.ctl.service(h.now);
+
+    const FollowStatus s = h.status();
+    TEST_ASSERT_EQUAL(FOLLOW_LOCK_LOCKED, s.state);
+    TEST_ASSERT_EQUAL_UINT32(1u, s.lockedUid);
+}
+
+void test_gate_inactive_reset_runs_even_inside_the_emitHz_throttle_window() {
+    FollowHarness h;
+    h.setPeer(/*uid=*/1, 1.0, 1.0, 0.0, 0.0);
+    h.fc.gcsNav = true;
+
+    h.ctl.service(h.now);
+    TEST_ASSERT_EQUAL(FOLLOW_LOCK_LOCKED, h.status().state);
+
+    // Gate drops and service() is called again 10ms later -- well inside the
+    // throttle window. IDLE/lock-clear must not wait for the throttle to
+    // clear either.
+    h.now += 10;
+    h.fc.gcsNav = false;
+    h.ctl.service(h.now);
+
+    const FollowStatus s = h.status();
+    TEST_ASSERT_EQUAL(FOLLOW_LOCK_IDLE, s.state);
+    TEST_ASSERT_EQUAL_UINT32(0u, s.lockedUid);
+}

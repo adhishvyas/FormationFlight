@@ -381,8 +381,14 @@ private:
     // three call sites are resolveLock()'s ACQUIRING->LOCKED transition,
     // forceReacquire(), and service()'s gate-inactive branch (spec SS3.2).
     void resetLeaderFilter();
-    void updateLeaderFilter(const Peer* peer, uint32_t now_ms);
+    void updateLeaderFilter(const Peer* peer);
     void updateSelfFilter(uint32_t now_ms);
+    // Returns `self` with lat/lon replaced by the filter's current estimate
+    // when positionFilterEnabled, or `self` unchanged otherwise (spec SS5's
+    // hard branch, not a gain degrade). alt_m is untouched -- the one
+    // altitude consumer (service()'s relative-altitude sum) reads
+    // selfFilter_.alt.position directly instead.
+    NodeLocation effectiveSelf(const NodeLocation& self) const;
     FollowOffset resolveOffset();
     double resolveAxisOffset(double configuredM, int16_t channel1Based) const;
     FollowOffset resolveCandidateOffset() const;

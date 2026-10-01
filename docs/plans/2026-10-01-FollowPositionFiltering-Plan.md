@@ -111,7 +111,7 @@ Also wire `resetLeaderFilter()` into `resolveLock()`'s `ACQUIRING → LOCKED` tr
 
 ---
 
-## C2. Leader filter wiring + consumers
+## C2. Leader filter wiring + consumers [Completed]
 
 Depends on: **C1**.
 
@@ -128,9 +128,11 @@ Depends on: **C1**.
 
 **Docs:** none beyond what **D**/**G** add once the full feature (including status visibility) is in place.
 
+**Test infrastructure change (done once, covers both C2 and C3):** `test/test_follow/test_helpers.h`'s `FollowHarness` now defaults `positionFilterEnabled = false` via a constructor that applies that one override on top of the compile-time defaults. Wiring the filtered reads into `resolveCourseDeg()`/`resolveHeadingDeg()`/`targetTooFar()`/etc. broke 8 pre-existing tests that predate this feature and assert exact raw course/speed/position values, or move self/peer directly between ticks rather than simulating continuous motion -- things the filter's smoothing (or its zero-velocity first sample) legitimately changes, but that have nothing to do with what those tests are actually checking. Per spec §5 the disabled path is exactly today's pre-feature behavior by construction, so defaulting the harness to disabled keeps every such test meaningful without touching any of their assertions; the new filter-specific tests (here and in **A**) opt back in explicitly via `configOf(h)`/`h.apply()`.
+
 ---
 
-## C3. Self filter wiring + consumers
+## C3. Self filter wiring + consumers [Completed]
 
 Depends on: **C1**. Independent of **C2** (different member, different reset rule, different call sites) — build in parallel with it.
 

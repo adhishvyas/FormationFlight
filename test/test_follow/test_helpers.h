@@ -100,6 +100,23 @@ struct FollowHarness {
     uint32_t now = 100000;  // start well past 0 so age arithmetic is unambiguous
     FollowController ctl{&peers, &self, &fc};
 
+    // Position filtering (docs/spec/2026-09-14-FollowPositionFiltering.md) is
+    // on by default in the firmware, but off by default here: most of this
+    // suite predates the feature and asserts exact raw course/speed/position
+    // values, or moves self/peer directly between ticks rather than
+    // simulating continuous motion -- the filter's smoothing (or its
+    // zero-velocity first sample) would distort those assertions in ways
+    // unrelated to whatever each test actually checks. Spec SS5 makes the
+    // disabled path exactly today's pre-feature behavior by construction, so
+    // this keeps every such test meaningful. Tests of the filter itself
+    // (test_position_filter_axis.cpp, test_position_filter.cpp) opt back in
+    // explicitly via configOf(h)/h.apply().
+    FollowHarness() {
+        FollowConfig cfg = ctl.config();
+        cfg.positionFilterEnabled = false;
+        ctl.applyConfig(cfg, nullptr);
+    }
+
     // Advances time past the default 4 Hz period (250 ms) and runs one cycle,
     // so the controller's own rate gate never swallows the tick.
     void tick() {

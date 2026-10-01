@@ -128,6 +128,13 @@ extern void test_resolve_filter_gains_strength_100_floors_alpha();
 extern void test_resolve_filter_gains_alpha_is_monotonic_non_increasing();
 extern void test_filtered_location_course_and_speed_round_trip_straight_line();
 
+// test_position_filter.cpp
+extern void test_leader_position_noise_rejection_reduces_target_jitter();
+extern void test_leader_filter_resets_on_relock_not_blended_with_previous_peer();
+extern void test_filtered_course_minCourseSpeed_fallback_holds_last_course();
+extern void test_self_position_noise_rejection_reduces_autothrottle_jitter();
+extern void test_point_leader_heading_stability_under_self_position_jitter();
+
 int main(int, char**) {
     UNITY_BEGIN();
 
@@ -237,6 +244,12 @@ int main(int, char**) {
     RUN_TEST(test_resolve_filter_gains_strength_100_floors_alpha);
     RUN_TEST(test_resolve_filter_gains_alpha_is_monotonic_non_increasing);
     RUN_TEST(test_filtered_location_course_and_speed_round_trip_straight_line);
+
+    RUN_TEST(test_leader_position_noise_rejection_reduces_target_jitter);
+    RUN_TEST(test_leader_filter_resets_on_relock_not_blended_with_previous_peer);
+    RUN_TEST(test_filtered_course_minCourseSpeed_fallback_holds_last_course);
+    RUN_TEST(test_self_position_noise_rejection_reduces_autothrottle_jitter);
+    RUN_TEST(test_point_leader_heading_stability_under_self_position_jitter);
 
     return UNITY_END();
 }

@@ -333,10 +333,17 @@ void FollowController::forceReacquire() {
 
 void FollowController::resetLeaderFilter() { leaderFilter_ = FollowPositionFilter(); }
 
-void FollowController::updateLeaderFilter(const Peer* peer, uint32_t now_ms) {
+void FollowController::updateLeaderFilter(const Peer* peer) {
     const auto gains = resolveFilterGains(config_.positionFilterStrengthPct);
-    updateFilterPosition(&leaderFilter_, peer->lat, peer->lon,
-                         static_cast<double>(peer->alt_m), now_ms, gains.first, gains.second);
+    // The filter's own clock is the packet's position timestamp, not
+    // service()'s call time: capture runs every service() call (SS4), so a
+    // cycle between two radio updates would otherwise feed the same stale
+    // lat/lon back in as if it were a fresh (zero-velocity) measurement.
+    // Keying off last_position_ms instead means a repeat call lands on
+    // updateAxis1D()'s existing dtS <= 0 no-op -- the dedup spec SS3.2 asks
+    // for, with no extra state here.
+    updateFilterPosition(&leaderFilter_, peer->lat, peer->lon, static_cast<double>(peer->alt_m),
+                         peer->last_position_ms, gains.first, gains.second);
 }
 
 void FollowController::updateSelfFilter(uint32_t now_ms) {
@@ -349,14 +356,39 @@ void FollowController::updateSelfFilter(uint32_t now_ms) {
                          gains.first, gains.second);
 }
 
+NodeLocation FollowController::effectiveSelf(const NodeLocation& self) const {
+    if (!config_.positionFilterEnabled) {
+        return self;
+    }
+    NodeLocation out = self;
+    const FollowFilteredLocation loc = filteredLocation(selfFilter_);
+    out.lat = loc.lat_1e7;
+    out.lon = loc.lon_1e7;
+    return out;
+}
+
 double FollowController::resolveCourseDeg(const Peer* peer) {
     // peer->speed_cms is cm/s; minCourseSpeed is human-facing m/s. Convert at
     // the comparison site.
     const int32_t minSpeedCmS = static_cast<int32_t>(std::lround(config_.minCourseSpeed * 100.0));
 
-    if (static_cast<int32_t>(peer->speed_cms) >= minSpeedCmS) {
+    // Hard branch (spec SS5), not a gain degrade: filtered reads replace the
+    // raw peer fields entirely when enabled. Both sides are exact-integer
+    // doubles for the disabled case, so the comparison/return values below
+    // are bit-for-bit what the pre-filter code produced.
+    double speedCmS;
+    double courseDeg;
+    if (config_.positionFilterEnabled) {
+        speedCmS = filteredSpeedMps(leaderFilter_) * 100.0;
+        courseDeg = filteredCourseDeg(leaderFilter_);
+    } else {
+        speedCmS = static_cast<double>(peer->speed_cms);
+        courseDeg = static_cast<double>(peer->course_ddeg) / 10.0;
+    }
+
+    if (speedCmS >= static_cast<double>(minSpeedCmS)) {
         haveValidCourse_ = true;
-        lastValidCourseDeg_ = static_cast<double>(peer->course_ddeg) / 10.0;
+        lastValidCourseDeg_ = courseDeg;
         return lastValidCourseDeg_;
     }
     // Leader's below threshold -- hold the last known course rather than
@@ -365,7 +397,7 @@ double FollowController::resolveCourseDeg(const Peer* peer) {
         return lastValidCourseDeg_;
     }
     // No valid course captured yet -- fall back to whatever's reported.
-    return static_cast<double>(peer->course_ddeg) / 10.0;
+    return courseDeg;
 }
 
 int16_t FollowController::resolveHeadingDeg(const Peer* peer, double courseDeg,
@@ -375,10 +407,18 @@ int16_t FollowController::resolveHeadingDeg(const Peer* peer, double courseDeg,
         case FOLLOW_HEADING_COURSE:
             raw = courseDeg;
             break;
-        case FOLLOW_HEADING_POINT_LEADER:
-            raw = geo::bearingDeg(deg1e7(self.lat), deg1e7(self.lon), deg1e7(peer->lat),
-                                  deg1e7(peer->lon));
+        case FOLLOW_HEADING_POINT_LEADER: {
+            const NodeLocation eff = effectiveSelf(self);
+            double peerLat = deg1e7(peer->lat);
+            double peerLon = deg1e7(peer->lon);
+            if (config_.positionFilterEnabled) {
+                const FollowFilteredLocation loc = filteredLocation(leaderFilter_);
+                peerLat = deg1e7(loc.lat_1e7);
+                peerLon = deg1e7(loc.lon_1e7);
+            }
+            raw = geo::bearingDeg(deg1e7(eff.lat), deg1e7(eff.lon), peerLat, peerLon);
             break;
+        }
         case FOLLOW_HEADING_FIXED:
             raw = config_.headingDeg;
             break;
@@ -405,9 +445,10 @@ int16_t FollowController::resolveHeadingDeg(const Peer* peer, double courseDeg,
 
 double FollowController::resolveAlongTrackErrorM(const FollowTarget& target, double courseDeg,
                                                  const NodeLocation& self) const {
+    const NodeLocation eff = effectiveSelf(self);
     double north_m;
     double east_m;
-    horizontalOffsetM(self, deg1e7(target.lat_1e7), deg1e7(target.lon_1e7), &north_m, &east_m);
+    horizontalOffsetM(eff, deg1e7(target.lat_1e7), deg1e7(target.lon_1e7), &north_m, &east_m);
     const double th = geo::toRad(courseDeg);
     return north_m * std::cos(th) + east_m * std::sin(th);
 }
@@ -485,7 +526,8 @@ FollowOffset FollowController::resolveOffset() {
 }
 
 bool FollowController::targetTooFar(const FollowTarget& target, const NodeLocation& self) const {
-    const double distFromSelf = geo::distanceM(deg1e7(self.lat), deg1e7(self.lon),
+    const NodeLocation eff = effectiveSelf(self);
+    const double distFromSelf = geo::distanceM(deg1e7(eff.lat), deg1e7(eff.lon),
                                                deg1e7(target.lat_1e7), deg1e7(target.lon_1e7));
     return distFromSelf > config_.maxTargetDistM;
 }
@@ -515,7 +557,7 @@ void FollowController::service(uint32_t now_ms) {
     } else {
         peer = resolveLock(now_ms);
         if (peer != nullptr && config_.positionFilterEnabled) {
-            updateLeaderFilter(peer, now_ms);
+            updateLeaderFilter(peer);
         }
     }
     if (config_.positionFilterEnabled) {
@@ -573,14 +615,26 @@ void FollowController::service(uint32_t now_ms) {
     const FollowOffset offset = resolveOffset();
     const double courseDeg = resolveCourseDeg(peer);
 
+    // LIVE mode's leader anchor: filtered when enabled (spec SS5's hard
+    // branch), the peer's raw fix otherwise.
+    int32_t leaderLat1e7 = peer->lat;
+    int32_t leaderLon1e7 = peer->lon;
+    if (config_.positionFilterEnabled) {
+        const FollowFilteredLocation leaderLoc = filteredLocation(leaderFilter_);
+        leaderLat1e7 = leaderLoc.lat_1e7;
+        leaderLon1e7 = leaderLoc.lon_1e7;
+    }
     const FollowTarget target =
-        slotToLatLon(peer->lat, peer->lon, courseDeg, offset.longitudinal_m, offset.lateral_m);
+        slotToLatLon(leaderLat1e7, leaderLon1e7, courseDeg, offset.longitudinal_m, offset.lateral_m);
 
     // localAltitudeCm() is the follower's baro/GPS-fused home-relative estimate;
-    // (peer.alt_m - self.alt_m) is a raw GPS-only MSL delta. Summed in double and
-    // rounded once. This frame mixing is a known accuracy bound (see
-    // FOLLOW_MIN_VSEP_M's GPS-error margin), not a bug.
-    const double relaltM = static_cast<double>(peer->alt_m) - static_cast<double>(self.alt_m);
+    // the second term is a raw GPS-only MSL delta (or, when filtering is
+    // enabled, both filters' own alt channels -- same delta, less noise).
+    // Summed in double and rounded once. This frame mixing is a known
+    // accuracy bound (see FOLLOW_MIN_VSEP_M's GPS-error margin), not a bug.
+    const double relaltM = config_.positionFilterEnabled
+                                ? (leaderFilter_.alt.position - selfFilter_.alt.position)
+                                : (static_cast<double>(peer->alt_m) - static_cast<double>(self.alt_m));
     const double altCmD = static_cast<double>(fc_->localAltitudeCm()) + relaltM * 100.0 +
                           offset.vertical_m * 100.0;
     int32_t altCm = static_cast<int32_t>(std::lround(altCmD));
@@ -681,9 +735,10 @@ void FollowController::updateDebugGvars(int32_t lat_1e7, int32_t lon_1e7, int32_
     if (!config_.debug) {
         return;
     }
+    const NodeLocation eff = effectiveSelf(self);
     double north_m;
     double east_m;
-    horizontalOffsetM(self, deg1e7(lat_1e7), deg1e7(lon_1e7), &north_m, &east_m);
+    horizontalOffsetM(eff, deg1e7(lat_1e7), deg1e7(lon_1e7), &north_m, &east_m);
     fc_->sendGvar(FOLLOW_DEBUG_NORTH_GVAR_INDEX, static_cast<int32_t>(std::lround(north_m * 100.0)));
     fc_->sendGvar(FOLLOW_DEBUG_EAST_GVAR_INDEX, static_cast<int32_t>(std::lround(east_m * 100.0)));
     fc_->sendGvar(FOLLOW_DEBUG_ALT_GVAR_INDEX, altCm);

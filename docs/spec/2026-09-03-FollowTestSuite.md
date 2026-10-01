@@ -4,7 +4,7 @@
 > and its web panel. The suite has since been ported: the Follow tests live in
 > `test/test_follow` against `lib/ff_core/follow.*`, with `test/follow-logic.test.js`
 > and `test/test_mock_server.py` checking the JS and Python validators against the
-> shared fixture in `fixtures/follow-config-cases.json`. Current behavior is
+> shared fixture in `../../test/fixtures/follow-config-cases.json`. Current behavior is
 > documented in [`../user-guide-follow-mode.md`](../user-guide-follow-mode.md).
 
 **Status:** Draft — not yet planned or implemented
@@ -153,7 +153,7 @@ Recommend option 1: it's a small, mechanical, low-risk move (pure functions into
 
 ### 3.6 The cross-mirror fixture
 
-A single data file — e.g. `docs/spec/fixtures/follow-config-cases.json` — of `{name, config, expectValid, expectedErrorSubstring?}` entries, covering every rule in §2.3's table (the shared C++/Python rules) plus a separately-marked set covering the JS-only superset rules. Three thin test files consume the same fixture:
+A single data file — e.g. `test/fixtures/follow-config-cases.json` — of `{name, config, expectValid, expectedErrorSubstring?}` entries, covering every rule in §2.3's table (the shared C++/Python rules) plus a separately-marked set covering the JS-only superset rules. Three thin test files consume the same fixture:
 
 - C++ native test: constructs a `FollowRuntimeConfig` from each case, calls `applyConfig()`, asserts pass/fail matches `expectValid` (shared cases only).
 - Python test (new, e.g. `test/test_mock_server.py`, or wherever the project prefers Python tests to live): calls `validate_config()` per case, same assertion (shared cases only).
@@ -298,7 +298,7 @@ Detailed in §2.3. A direct `POST /followmanager/config` bypassing the web UI ca
 
 ### 7.2 §2.3's "Python mirrors only the C++ rules, JS is a strict superset" is incorrect — all three validators disagree in both directions
 
-Discovered while building the §3.6 cross-mirror fixture (`docs/spec/fixtures/follow-config-cases.json`) and its three consumers (§4.15). Tracing all three `validate*`/`applyConfig()` implementations line-by-line against the same fixture found real divergence beyond §7.1's already-known gap:
+Discovered while building the §3.6 cross-mirror fixture (`test/fixtures/follow-config-cases.json`) and its three consumers (§4.15). Tracing all three `validate*`/`applyConfig()` implementations line-by-line against the same fixture found real divergence beyond §7.1's already-known gap:
 
 - **`mock_server.py`'s `validate_config()` is missing two rules both C++ and JS have**: it never checks `targetPeer` against `NODES_MAX`, and — more significantly — it has **no `offsetGeometrySane()` equivalent at all**. A config with a geometrically-insane static offset (e.g. `ofsLongM=-2` against the default `minSepM=8`) passes Python validation outright. This isn't the documented "UI-only, deliberately not duplicated" case (§7.1) — geometry sanity is meant to be enforced everywhere; this looks like an oversight, not a choice.
 - **`follow.js`'s `validateConfig()` is missing six rules C++ and Python both have**: no `targetPeer` range check, no GVAR-index range check (`-1` or `0-7`) for any of the four GVAR fields (it only checks *uniqueness* among them, not individual validity), no RC-channel range check (`-1` or `1-16`) for any of the four channel fields (same gap — uniqueness only), no `maxTargetSpeedMps > minTargetSpeedMps >= 0` check, and no `speedCorrectionAccelCmS2 >= 0` check. So JS is neither a strict superset nor subset of C++ — it adds four rules (§2.3's original finding) while lacking six others.

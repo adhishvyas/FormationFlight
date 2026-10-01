@@ -10,7 +10,7 @@ platformio.ini
 *.json
 # ...but our library manifests and test fixtures are real source, not build artifacts.
 !lib/**/library.json
-!docs/spec/fixtures/*.json
+!test/fixtures/*.json
 src/hal/staticfilehandler.inc
 src/hal/webcontent.h
 *.pyc

@@ -5,7 +5,7 @@ developed against docs/v2-web-api.md with no hardware attached.
 Three things are being checked, and only the first is really about Python:
 
   1. The shared cross-language fixture. Every case in
-     docs/spec/fixtures/follow-config-cases.json is run against the mock's
+     test/fixtures/follow-config-cases.json is run against the mock's
      Follow validation -- the same cases the C++ validator
      (test/test_follow/test_cross_mirror_fixture.cpp) and the JS one
      (test/follow-logic.test.js) are run against. If the three drift apart, a
@@ -72,8 +72,8 @@ from mock_server import (  # noqa: E402
 )
 
 FIXTURE_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..",
-    "docs", "spec", "fixtures", "follow-config-cases.json",
+    os.path.dirname(os.path.abspath(__file__)),
+    "fixtures", "follow-config-cases.json",
 )
 
 UID_RE = re.compile(r"^[0-9a-f]{8}$")

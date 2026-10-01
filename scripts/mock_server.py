@@ -37,7 +37,7 @@ drift. Each carries a comment naming what it mirrors:
     more specific than the doc, it wins: it is what the UI will actually meet.
 
 test/test_mock_server.py checks the Follow half against
-docs/spec/fixtures/follow-config-cases.json -- the same fixture the C++
+test/fixtures/follow-config-cases.json -- the same fixture the C++
 (test/test_follow/test_cross_mirror_fixture.cpp) and JS
 (test/follow-logic.test.js) validators are tested against.
 

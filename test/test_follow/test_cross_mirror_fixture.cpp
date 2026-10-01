@@ -70,7 +70,7 @@ static FollowConfig configFromJson(const JsonObjectConst& obj) {
 
 // Resolved relative to the project root -- PlatformIO's `pio test` runs
 // with the project directory as the working directory.
-static const char* kFixturePath = "docs/spec/fixtures/follow-config-cases.json";
+static const char* kFixturePath = "test/fixtures/follow-config-cases.json";
 
 static bool startsWith(const char* s, const char* prefix) {
     return s != nullptr && std::strncmp(s, prefix, std::strlen(prefix)) == 0;

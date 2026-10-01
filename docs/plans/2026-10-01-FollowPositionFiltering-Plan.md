@@ -75,7 +75,7 @@ Depends on: nothing. Independent of **A** — this is plumbing and a validation 
 
 **`lib/ff_core/follow.cpp`'s `followValidateConfig()`:** reject `positionFilterStrengthPct > 100` (same pattern as the existing `statusGvarIndex`/`conditionFlagsGvarIndex` range checks). `positionFilterEnabled` is a bool, nothing to validate.
 
-**`docs/spec/fixtures/follow-config-cases.json`:** add `positionFilterEnabled`/`positionFilterStrengthPct` to `baseline` (matching the compile-time defaults above), and new `cases` entries: `positionFilterStrengthPct_101_fails` (overrides `{"positionFilterStrengthPct": 101}`, `expectValid: false`), `positionFilterStrengthPct_0_valid` and `_100_valid` (boundary values, `expectValid: true`), `positionFilterEnabled_false_valid`. This is the single source of truth all three validators below are tested against (`test/test_mock_server.py`'s existing fixture-driven test already walks every `cases` entry — no new Python test code needed beyond the fixture additions).
+**`test/fixtures/follow-config-cases.json`:** add `positionFilterEnabled`/`positionFilterStrengthPct` to `baseline` (matching the compile-time defaults above), and new `cases` entries: `positionFilterStrengthPct_101_fails` (overrides `{"positionFilterStrengthPct": 101}`, `expectValid: false`), `positionFilterStrengthPct_0_valid` and `_100_valid` (boundary values, `expectValid: true`), `positionFilterEnabled_false_valid`. This is the single source of truth all three validators below are tested against (`test/test_mock_server.py`'s existing fixture-driven test already walks every `cases` entry — no new Python test code needed beyond the fixture additions).
 
 **`test/test_follow/test_cross_mirror_fixture.cpp`'s `configFromJson()`:** add the two new fields to the field mapping (mirrors how every other fixture field is read).
 
@@ -88,6 +88,8 @@ Depends on: nothing. Independent of **A** — this is plumbing and a validation 
 **Tests:**
 - `test/test_follow/test_config_validation.cpp`: extend with explicit `positionFilterStrengthPct` boundary cases (0, 100, 101) if not already fully covered by the fixture-driven cross-mirror test — the fixture covers cross-mirror agreement, this file's existing style covers `FollowController::applyConfig()`'s direct accept/reject behavior.
 - `test/test_mock_server.py` / `test/follow-logic.test.js`: no new test *code* needed — both already walk `follow-config-cases.json`'s `cases` array, so the fixture additions above are picked up automatically. Run both to confirm.
+
+**Fixture relocation (done after B completed):** the shared fixture moved from `docs/spec/fixtures/` to `test/fixtures/follow-config-cases.json` — it is test input, not documentation. Its three consumers (`test_cross_mirror_fixture.cpp`'s `kFixturePath`, `test_mock_server.py`'s `FIXTURE_PATH`, `follow-logic.test.js`'s `fixturePath`), the `.gitignore` un-ignore rule, and the path mentions in `scripts/mock_server.py`, `.github/workflows/test.yml`, and the spec docs were updated to match. Later phases that touch the fixture should use the new path.
 
 **Docs:** `docs/v2-web-api.md`'s config section (wherever the `follow` object's field list / example lives) gains the two new field names, types, and defaults — written now even though no UI exists yet, since the wire contract exists as soon as `configToJson()`/`mergeFollow()` pick the fields up automatically via the macro.
 

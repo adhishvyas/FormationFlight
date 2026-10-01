@@ -10,7 +10,7 @@ import path from 'node:path';
 import { slotFromOffset, offsetFromSlot, validateConfig } from '../html/follow-logic.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const fixturePath = path.join(__dirname, '..', 'docs', 'spec', 'fixtures', 'follow-config-cases.json');
+const fixturePath = path.join(__dirname, 'fixtures', 'follow-config-cases.json');
 const fixture = JSON.parse(readFileSync(fixturePath, 'utf8'));
 
 // ---- Cross-mirror equivalence (JS side): every fixture case's

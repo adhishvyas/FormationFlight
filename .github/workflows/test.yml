@@ -40,7 +40,7 @@ jobs:
 
   # The Follow web UI's pure logic and the dev mock server validate configs
   # against the same fixture the native suite does
-  # (docs/spec/fixtures/follow-config-cases.json), so all three run in CI
+  # (test/fixtures/follow-config-cases.json), so all three run in CI
   # to keep the three validators from drifting apart.
   follow-logic-js:
     runs-on: ubuntu-latest

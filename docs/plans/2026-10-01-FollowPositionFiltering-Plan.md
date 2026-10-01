@@ -168,7 +168,7 @@ Depends on: **C2**, **C3** (needs both filters fully wired to write the tests th
 
 ---
 
-## E. Web UI panel + client validation mirror
+## E. Web UI panel + client validation mirror [Completed]
 
 Depends on: **B** (field names/validation for the config toggle), **D** (status fields for the display half).
 
@@ -182,7 +182,7 @@ Depends on: **B** (field names/validation for the config toggle), **D** (status 
 
 ---
 
-## F. mock_server.py status parity
+## F. mock_server.py status parity [Completed]
 
 Depends on: **D** (needs the firmware's status wire shape settled to mirror it).
 

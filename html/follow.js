@@ -208,6 +208,11 @@ function FollowStatusPanel({ status, cfg }) {
   <${StatRow} label="FC" value=${fc.connected ? `${fc.variant || '?'} ${fc.version || ''}` : 'not connected'} />
   <${StatRow} label="Platform" value=${platform || DASH}
     tip="INAV's mixer platform type, as the FC reported it. Autothrottle only applies to fixed wing." />
+  ${cfg && cfg.positionFilterEnabled && html`
+  <${StatRow} label="Leader filter" value=${f.leader_filter_initialized ? 'ready' : 'warming up'}
+    tip="Whether the leader position/velocity filter has captured its first sample yet." />
+  <${StatRow} label="Self filter" value=${f.self_filter_initialized ? 'ready' : 'warming up'}
+    tip="Whether this node's own position/velocity filter has captured its first sample yet." />`}
 
   <${SectionTitle} title="Target" />
   ${f.target ? html`
@@ -372,6 +377,11 @@ export default function FollowPage({ status }) {
         tip="Absolute floor on the commanded home-relative altitude. A clamp rather than a refusal: the target is raised to it and the condition GVAR says so." />
       <${Setting} title="Min course speed" value=${cfg.minCourseSpeed} setfn=${mkNum('minCourseSpeed')} type="number" addonRight="m/s"
         tip="Below this leader ground speed their reported course is noise, so the last valid course is held instead - otherwise a hovering leader would spin the whole slot geometry around." />
+      <${Setting} title="Position filtering" value=${cfg.positionFilterEnabled} setfn=${mk('positionFilterEnabled')} type="switch"
+        tip="Smooths both the leader's and this node's own GPS position/course with a recursive filter before they reach the slot math, instead of reacting to every raw fix. On by default." />
+      <${Setting} title="Filter strength" value=${cfg.positionFilterStrengthPct} setfn=${mkNum('positionFilterStrengthPct')} type="number" addonRight="%"
+        disabled=${!cfg.positionFilterEnabled}
+        tip="0 is the lightest smoothing, 100 the heaviest. Heavier smoothing rejects more GPS noise but lags a real maneuver more." />
       ${err('bounds')}
     <//>
 

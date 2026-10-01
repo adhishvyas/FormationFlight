@@ -351,6 +351,18 @@ class MergeConfigTest(unittest.TestCase):
         self.assertEqual(merged["security"]["passphrase"], "groupkey")
         self.assertEqual(merged["follow"]["ofsVertM"], cfg["follow"]["ofsVertM"])
 
+    def test_position_filter_fields_round_trip_through_merge(self):
+        """Regression guard: a field can be in default_follow_config() and
+        validate_follow_config() yet still be silently dropped by a POST if
+        it is missing from _FOLLOW_FIELD_TYPES, the table merge_config()
+        actually walks."""
+        merged, err = merge_config(
+            {"follow": {"positionFilterEnabled": False, "positionFilterStrengthPct": 80}},
+            default_config())
+        self.assertIsNone(err)
+        self.assertEqual(merged["follow"]["positionFilterEnabled"], False)
+        self.assertEqual(merged["follow"]["positionFilterStrengthPct"], 80)
+
     def test_a_partial_section_only_touches_the_keys_it_names(self):
         cfg = default_config()
         merged, err = merge_config({"rate": {"target_load": 0.2}}, cfg)
@@ -783,10 +795,16 @@ class StatusShapeTest(ApiTestCase):
     def test_follow_block_and_its_absent_when_unknown_fields(self):
         follow = self.get_json("/api/status")["follow"]
         for key in ("state", "gate_active", "locked_uid", "locked_name", "platform",
-                    "autothrottle_armed", "rc_slot_frozen", "prearm_failed"):
+                    "autothrottle_armed", "rc_slot_frozen", "prearm_failed",
+                    "leader_filter_initialized", "self_filter_initialized"):
             self.assertIn(key, follow)
         self.assertIn(follow["state"], ("IDLE", "ACQUIRING", "LOCKED", "LOCKED_HOLDING"))
         self.assertRegex(follow["locked_uid"], UID_RE)
+        # Position filtering (docs/spec/2026-09-14-FollowPositionFiltering.md):
+        # always-present booleans, like gate_active -- meaningful even before
+        # a target has been solved, unlike the haveLastTarget-gated fields.
+        self.assertIsInstance(follow["leader_filter_initialized"], bool)
+        self.assertIsInstance(follow["self_filter_initialized"], bool)
         # GVAR slots are disabled by default, so those keys are absent rather
         # than present and zero (zero is a legitimate GVAR value).
         self.assertNotIn("status_gvar", follow)

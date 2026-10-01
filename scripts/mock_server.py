@@ -172,6 +172,8 @@ _FOLLOW_FIELD_TYPES = {
     "autothrottleEnableMinThresholdUs": ("i", 16, True),
     "autothrottleEnableMaxThresholdUs": ("i", 16, True),
     "speedCorrectionAccelCmS2": ("i", 16, True),
+    "positionFilterEnabled": ("b", 0, False),
+    "positionFilterStrengthPct": ("i", 8, False),
     # FOLLOW_CONFIG_ROUNDED_FIELDS (doubles in RAM; only the EEPROM record rounds)
     "ofsLongM": ("f", 0, True),
     "ofsLatM": ("f", 0, True),
@@ -768,6 +770,12 @@ FRAME_CATCHUP_BUDGET = 200
 FOLLOW_ACQUIRE_AT_MS = 1500
 FOLLOW_LOCK_AT_MS = 6000
 
+# Fake "has the position filter captured its first sample yet" warm-up delay
+# (docs/spec/2026-09-14-FollowPositionFiltering.md). The mock doesn't run the
+# real alpha-beta filter -- this is just enough lag for the UI's "warming up"
+# vs "ready" indicator to be visible rather than flipping instantly.
+FOLLOW_FILTER_WARMUP_MS = 1000
+
 # WebServer::kSaveMinIntervalMs -- minimum gap between config.json writes.
 SAVE_MIN_INTERVAL_MS = 2000
 # How long after answering the node actually reboots (WebServer.cpp).
@@ -1111,6 +1119,7 @@ class MockNode:
         self.have_last_target = False
         self.locked_uid = 0
         self.locked_name = ""
+        self.follow_locked_since_ms = None
         self.reboot_required = False
         self.ever_saved = False
         self.last_save_ms = 0
@@ -1531,13 +1540,19 @@ class MockNode:
             self.follow_state = 0          # IDLE, gate not up yet
             self.locked_uid = 0
             self.locked_name = ""
+            self.follow_locked_since_ms = None
             return
         peer = self._resolve_lock(now_ms)
         if peer is None or now_ms < FOLLOW_LOCK_AT_MS:
             self.follow_state = 1          # ACQUIRING
             self.locked_uid = 0
             self.locked_name = ""
+            self.follow_locked_since_ms = None
             return
+        if self.locked_uid != peer.uid:
+            # A fresh lock (or a relock onto a different peer) resets the
+            # leader filter on real firmware -- restart its warm-up clock too.
+            self.follow_locked_since_ms = now_ms
         self.follow_state = 2              # LOCKED
         self.locked_uid = peer.uid
         self.locked_name = peer.name
@@ -1564,6 +1579,16 @@ class MockNode:
             "rc_slot_frozen": False,
             "prearm_failed": False,
         }
+
+        # Always present, like gate_active -- "has the filter seen its first
+        # sample" is meaningful even before a target has been solved. Both
+        # read false while the feature itself is off, since the filters are
+        # never fed (ff::FollowController::status() mirrors this exactly).
+        filter_enabled = cfg.get("positionFilterEnabled", True)
+        doc["leader_filter_initialized"] = bool(
+            filter_enabled and self.follow_locked_since_ms is not None and
+            now_ms - self.follow_locked_since_ms >= FOLLOW_FILTER_WARMUP_MS)
+        doc["self_filter_initialized"] = bool(filter_enabled and now_ms >= FOLLOW_FILTER_WARMUP_MS)
 
         locked = self.follow_state in (2, 3)
         peer = self.active_peers().get(self.locked_uid) if locked else None

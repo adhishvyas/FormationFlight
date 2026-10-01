@@ -206,6 +206,8 @@ def default_follow_config():
         "autothrottleEnableMinThresholdUs": 1700,
         "autothrottleEnableMaxThresholdUs": 2100,
         "speedCorrectionAccelCmS2": 0,
+        "positionFilterEnabled": True,
+        "positionFilterStrengthPct": 50,
         # ROUNDED
         "ofsLongM": -15.0,
         "ofsLatM": 0.0,
@@ -410,6 +412,9 @@ def validate_follow_config(f):
     if i("speedCorrectionAccelCmS2", 0) < 0:
         # A magnitude fed through copysignf(); negative would push the wrong way.
         return "speedCorrectionAccelCmS2 must be >= 0"
+    strength_pct = f.get("positionFilterStrengthPct", 50)
+    if strength_pct < 0 or strength_pct > 100:
+        return "positionFilterStrengthPct must be 0-100"
 
     # Offset geometry rules against the canonical offset -- mirrors service()'s
     # check so an accepted config can never be rejected by it later.

@@ -787,6 +787,10 @@ bool followValidateConfig(const FollowConfig& newConfig, const char** err) {
         *err = "speedCorrectionAccelCmS2 must be >= 0";
         return false;
     }
+    if (newConfig.positionFilterStrengthPct > 100) {
+        *err = "positionFilterStrengthPct must be 0-100";
+        return false;
+    }
 
     // Offset geometry rules against the canonical offset -- mirrors service()'s
     // check so an accepted config can never be rejected by it later.

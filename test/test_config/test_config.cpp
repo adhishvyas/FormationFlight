@@ -67,6 +67,9 @@ private:
 static void expectSame(const char* what, bool a, bool b) {
     TEST_ASSERT_EQUAL_INT_MESSAGE(a ? 1 : 0, b ? 1 : 0, what);
 }
+static void expectSame(const char* what, uint8_t a, uint8_t b) {
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(a, b, what);
+}
 static void expectSame(const char* what, uint16_t a, uint16_t b) {
     TEST_ASSERT_EQUAL_UINT16_MESSAGE(a, b, what);
 }

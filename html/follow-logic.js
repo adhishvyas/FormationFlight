@@ -144,6 +144,9 @@ export function validateConfig(cfg) {
     // Fed through copysignf() as a magnitude; negative would brake the wrong way.
     return { section: 'autothrottle', message: 'speedCorrectionAccelCmS2 must be >= 0' };
   }
+  if (cfg.positionFilterStrengthPct < 0 || cfg.positionFilterStrengthPct > 100) {
+    return { section: 'bounds', message: 'positionFilterStrengthPct must be 0-100' };
+  }
 
   const geo = offsetGeometryError(
     { longitudinal_m: cfg.ofsLongM, lateral_m: cfg.ofsLatM, vertical_m: cfg.ofsVertM },

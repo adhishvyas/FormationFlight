@@ -928,6 +928,8 @@ curl -s http://192.168.4.1/api/status
 | `speedCorrectionAccelCmS2` | number | Slot-lag correction accel, cm/s^2. `0` is pure feedforward |
 | `minTargetSpeedMps` | number | Lower clamp on the commanded autothrottle speed, m/s. Must be greater than 0 once `autothrottleEnableRcChannel` is set |
 | `maxTargetSpeedMps` | number | Upper clamp, m/s. Must be greater than `minTargetSpeedMps` once an arm channel is set |
+| `positionFilterEnabled` | boolean | Smooths leader and follower GPS position/velocity noise upstream of every Follow computation. On by default |
+| `positionFilterStrengthPct` | number | `0`-`100`. `0` is the lightest smoothing, `100` the heaviest. Default `50` |
 | `debug` | boolean | RAM-only debug-GVAR toggle, §6.5. Never persisted; always `false` after a reboot |
 
 Two things to watch:
@@ -971,6 +973,8 @@ Example `follow` block, at the shipped defaults:
   "speedCorrectionAccelCmS2": 0,
   "minTargetSpeedMps": 0,
   "maxTargetSpeedMps": 0,
+  "positionFilterEnabled": true,
+  "positionFilterStrengthPct": 50,
   "debug": false
 }
 ```

@@ -74,6 +74,9 @@ static const ConfigCase kConfigCases[] = {
     {"rcLongChannel==rcLatChannel fails", [](FollowConfig& c) { c.rcLongChannel = 5; c.rcLatChannel = 5; }, false},
     {"autothrottleEnableRcChannel overlaps rc axis channel fails", [](FollowConfig& c) { c.rcLongChannel = 5; c.autothrottleEnableRcChannel = 5; }, false},
     {"autothrottleEnableMaxThresholdUs<=MinThresholdUs fails", [](FollowConfig& c) { c.autothrottleEnableMinThresholdUs = 2100; c.autothrottleEnableMaxThresholdUs = 1700; }, false},
+    {"positionFilterStrengthPct=101 fails",   [](FollowConfig& c) { c.positionFilterStrengthPct = 101; }, false},
+    {"positionFilterStrengthPct=0 passes",    [](FollowConfig& c) { c.positionFilterStrengthPct = 0; },   true},
+    {"positionFilterStrengthPct=100 passes",  [](FollowConfig& c) { c.positionFilterStrengthPct = 100; }, true},
 };
 // clang-format on
 

@@ -27,6 +27,12 @@ static void setField(const JsonObjectConst& obj, const char* key, uint32_t& fiel
 static void setField(const JsonObjectConst& obj, const char* key, int16_t& field) {
     if (obj.containsKey(key)) field = obj[key].as<int16_t>();
 }
+static void setField(const JsonObjectConst& obj, const char* key, uint8_t& field) {
+    if (obj.containsKey(key)) field = obj[key].as<uint8_t>();
+}
+static void setField(const JsonObjectConst& obj, const char* key, bool& field) {
+    if (obj.containsKey(key)) field = obj[key].as<bool>();
+}
 
 static FollowConfig configFromJson(const JsonObjectConst& obj) {
     FollowConfig cfg;
@@ -57,6 +63,8 @@ static FollowConfig configFromJson(const JsonObjectConst& obj) {
     setField(obj, "speedCorrectionAccelCmS2", cfg.speedCorrectionAccelCmS2);
     setField(obj, "minTargetSpeedMps", cfg.minTargetSpeedMps);
     setField(obj, "maxTargetSpeedMps", cfg.maxTargetSpeedMps);
+    setField(obj, "positionFilterEnabled", cfg.positionFilterEnabled);
+    setField(obj, "positionFilterStrengthPct", cfg.positionFilterStrengthPct);
     return cfg;
 }
 

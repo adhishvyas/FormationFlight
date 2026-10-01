@@ -114,6 +114,18 @@ extern void test_status_conditional_fields_present_and_absent_as_documented();
 // test_cross_mirror_fixture.cpp
 extern void test_applyConfig_matches_every_fixture_case();
 
+// test_position_filter_axis.cpp
+extern void test_axis1d_first_sample_initializes_without_residual_math();
+extern void test_axis1d_duplicate_timestamp_is_noop();
+extern void test_axis1d_out_of_order_timestamp_is_noop();
+extern void test_axis1d_tracks_constant_velocity_signal_with_reduced_variance();
+extern void test_axis1d_tracks_step_change_with_bounded_lag();
+extern void test_resolve_filter_gains_strength_0_is_minimal_smoothing();
+extern void test_resolve_filter_gains_strength_50_matches_spec_example();
+extern void test_resolve_filter_gains_strength_100_floors_alpha();
+extern void test_resolve_filter_gains_alpha_is_monotonic_non_increasing();
+extern void test_filtered_location_course_and_speed_round_trip_straight_line();
+
 int main(int, char**) {
     UNITY_BEGIN();
 
@@ -210,6 +222,17 @@ int main(int, char**) {
     RUN_TEST(test_status_conditional_fields_present_and_absent_as_documented);
 
     RUN_TEST(test_applyConfig_matches_every_fixture_case);
+
+    RUN_TEST(test_axis1d_first_sample_initializes_without_residual_math);
+    RUN_TEST(test_axis1d_duplicate_timestamp_is_noop);
+    RUN_TEST(test_axis1d_out_of_order_timestamp_is_noop);
+    RUN_TEST(test_axis1d_tracks_constant_velocity_signal_with_reduced_variance);
+    RUN_TEST(test_axis1d_tracks_step_change_with_bounded_lag);
+    RUN_TEST(test_resolve_filter_gains_strength_0_is_minimal_smoothing);
+    RUN_TEST(test_resolve_filter_gains_strength_50_matches_spec_example);
+    RUN_TEST(test_resolve_filter_gains_strength_100_floors_alpha);
+    RUN_TEST(test_resolve_filter_gains_alpha_is_monotonic_non_increasing);
+    RUN_TEST(test_filtered_location_course_and_speed_round_trip_straight_line);
 
     return UNITY_END();
 }

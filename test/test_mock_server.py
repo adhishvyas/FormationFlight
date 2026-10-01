@@ -231,6 +231,8 @@ class DefaultConfigTest(unittest.TestCase):
         self.assertEqual(f["speedCorrectionAccelCmS2"], 0)
         self.assertEqual(f["minTargetSpeedMps"], 0.0)
         self.assertEqual(f["maxTargetSpeedMps"], 0.0)
+        self.assertIs(f["positionFilterEnabled"], True)
+        self.assertEqual(f["positionFilterStrengthPct"], 50)
         self.assertIs(f["debug"], False)
 
 

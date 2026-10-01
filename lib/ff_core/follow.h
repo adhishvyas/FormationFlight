@@ -158,6 +158,16 @@ enum FollowHeadingMode {
 #ifndef FOLLOW_MAX_TARGET_SPEED_MPS
 #define FOLLOW_MAX_TARGET_SPEED_MPS 0.0
 #endif
+// Recursive position/velocity filter smoothing both the leader's and the
+// follower's own position -- see docs/spec/2026-09-14-FollowPositionFiltering.md.
+#ifndef FOLLOW_POSITION_FILTER_ENABLED
+#define FOLLOW_POSITION_FILTER_ENABLED true
+#endif
+// 0-100: 0 = lightest smoothing, 100 = heaviest. See follow_filter.h's
+// resolveFilterGains().
+#ifndef FOLLOW_POSITION_FILTER_STRENGTH_PCT
+#define FOLLOW_POSITION_FILTER_STRENGTH_PCT 50
+#endif
 
 namespace ff {
 
@@ -234,6 +244,9 @@ struct FollowConfig {
     double minTargetSpeedMps = FOLLOW_MIN_TARGET_SPEED_MPS;
     double maxTargetSpeedMps = FOLLOW_MAX_TARGET_SPEED_MPS;
 
+    bool positionFilterEnabled = FOLLOW_POSITION_FILTER_ENABLED;
+    uint8_t positionFilterStrengthPct = FOLLOW_POSITION_FILTER_STRENGTH_PCT;
+
     // RAM only: never persisted, always false again after a reboot.
     bool debug = FOLLOW_DEBUG_ENABLED;
 };
@@ -247,7 +260,8 @@ struct FollowConfig {
     X(conditionFlagsGvarIndex) X(rcLongChannel) X(rcLatChannel)             \
     X(rcVertChannel) X(targetSpeedGvarIndex) X(autothrottleEngageGvarIndex) \
     X(autothrottleEnableRcChannel) X(autothrottleEnableMinThresholdUs)      \
-    X(autothrottleEnableMaxThresholdUs) X(speedCorrectionAccelCmS2)
+    X(autothrottleEnableMaxThresholdUs) X(speedCorrectionAccelCmS2)         \
+    X(positionFilterEnabled) X(positionFilterStrengthPct)
 #define FOLLOW_CONFIG_ROUNDED_FIELDS(X)                                  \
     X(ofsLongM) X(ofsLatM) X(ofsVertM) X(minSepM) X(minVSepM)            \
     X(maxTargetDistM) X(minAltM) X(minCourseSpeed) X(headingDeg)         \

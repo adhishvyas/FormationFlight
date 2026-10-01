@@ -12,7 +12,8 @@
     "targetSpeedGvarIndex": -1, "autothrottleEngageGvarIndex": -1,
     "autothrottleEnableRcChannel": -1,
     "autothrottleEnableMinThresholdUs": 1700, "autothrottleEnableMaxThresholdUs": 2100,
-    "speedCorrectionAccelCmS2": 0, "minTargetSpeedMps": 0.0, "maxTargetSpeedMps": 0.0
+    "speedCorrectionAccelCmS2": 0, "minTargetSpeedMps": 0.0, "maxTargetSpeedMps": 0.0,
+    "positionFilterEnabled": true, "positionFilterStrengthPct": 50
   },
 
   "cases": [
@@ -149,6 +150,31 @@
       "overrides": { "autothrottleEnableMinThresholdUs": 2100, "autothrottleEnableMaxThresholdUs": 1700 },
       "expectValid": false,
       "note": "Previously JS-only, deliberately not duplicated server-side per mock_server.py's old comment. Fixed by adding the same ordering check to applyConfig() and validate_config()."
+    },
+
+    {
+      "name": "positionFilterStrengthPct_101_fails",
+      "overrides": { "positionFilterStrengthPct": 101 },
+      "expectValid": false,
+      "note": "docs/spec/2026-09-14-FollowPositionFiltering.md §5 -- the single tuning knob is 0-100."
+    },
+    {
+      "name": "positionFilterStrengthPct_0_valid",
+      "overrides": { "positionFilterStrengthPct": 0 },
+      "expectValid": true,
+      "note": "Boundary: lightest smoothing, alpha=1/beta=1."
+    },
+    {
+      "name": "positionFilterStrengthPct_100_valid",
+      "overrides": { "positionFilterStrengthPct": 100 },
+      "expectValid": true,
+      "note": "Boundary: heaviest smoothing, alpha floored at kFollowFilterMinAlpha."
+    },
+    {
+      "name": "positionFilterEnabled_false_valid",
+      "overrides": { "positionFilterEnabled": false },
+      "expectValid": true,
+      "note": "Master on/off switch -- a plain bool, nothing to range-check."
     }
   ]
 }

@@ -339,6 +339,32 @@ export default function FollowPage({ status }) {
       ${err('slot')}
     <//>
 
+    <${Card} title="Heading" icon=${Icons.scan}>
+      <${Setting} title="Heading mode" value=${cfg.headingMode} setfn=${mk('headingMode')} type="select" options=${HEADING_MODES}
+        tip="What to command as nose heading, sent through waypoint 255's p1 field and MSP_SET_HEAD. Off leaves the FC's own heading logic alone." />
+      <${Setting} title="Heading angle" value=${cfg.headingDeg} setfn=${mkNum('headingDeg')} type="number" addonRight="°"
+        disabled=${cfg.headingMode !== 'FIXED' && cfg.headingMode !== 'COURSE_RELATIVE'}
+        tip="An absolute compass heading in Fixed mode, or an offset added to the leader's course in Course-relative mode." />
+    <//>
+
+    <${Card} title="Safety bounds" icon=${Icons.shield}>
+      <p class="text-xs text-gray-400 mb-3">
+        These are refusals, not suggestions: a slot that fails them is rejected by the firmware as well, so a
+        config accepted here can never be turned down later.
+      <//>
+      <${Setting} title="Min separation" value=${cfg.minSepM} setfn=${mkNum('minSepM')} type="number" addonRight="m"
+        tip="Minimum 3D magnitude of the slot. It forbids the degenerate 'fly into the leader' offset outright." />
+      <${Setting} title="Min vertical separation" value=${cfg.minVSepM} setfn=${mkNum('minVSepM')} type="number" addonRight="m"
+        tip="Applies only to stacked slots - directly above or below with essentially no horizontal offset. It is sized to absorb GPS vertical error, which is far worse than horizontal, not just physical clearance." />
+      <${Setting} title="Max target distance" value=${cfg.maxTargetDistM} setfn=${mkNum('maxTargetDistM')} type="number" addonRight="m"
+        tip="Runtime sanity bound on how far the solved target may be from us. A solution beyond it is refused rather than chased, which is what stops a stale or spoofed position dragging the aircraft away." />
+      <${Setting} title="Altitude floor" value=${cfg.minAltM} setfn=${mkNum('minAltM')} type="number" addonRight="m"
+        tip="Absolute floor on the commanded home-relative altitude. A clamp rather than a refusal: the target is raised to it and the condition GVAR says so." />
+      <${Setting} title="Min course speed" value=${cfg.minCourseSpeed} setfn=${mkNum('minCourseSpeed')} type="number" addonRight="m/s"
+        tip="Below this leader ground speed their reported course is noise, so the last valid course is held instead - otherwise a hovering leader would spin the whole slot geometry around." />
+      ${err('bounds')}
+    <//>
+
     <${Card} title="Trigger and target" icon=${Icons.bolt}>
       <${Setting} title="Trigger" value=${cfg.triggerMode || 'GCSNAV'} type="static"
         tip="Compiled in at build time (FOLLOW_TRIGGER_MODE), not editable here. GCSNAV follows while INAV's GCS-NAV mode is on; AUX follows a switch." />
@@ -368,32 +394,6 @@ export default function FollowPage({ status }) {
       ${err('trigger')}
     <//>
 
-    <${Card} title="Safety bounds" icon=${Icons.shield}>
-      <p class="text-xs text-gray-400 mb-3">
-        These are refusals, not suggestions: a slot that fails them is rejected by the firmware as well, so a
-        config accepted here can never be turned down later.
-      <//>
-      <${Setting} title="Min separation" value=${cfg.minSepM} setfn=${mkNum('minSepM')} type="number" addonRight="m"
-        tip="Minimum 3D magnitude of the slot. It forbids the degenerate 'fly into the leader' offset outright." />
-      <${Setting} title="Min vertical separation" value=${cfg.minVSepM} setfn=${mkNum('minVSepM')} type="number" addonRight="m"
-        tip="Applies only to stacked slots - directly above or below with essentially no horizontal offset. It is sized to absorb GPS vertical error, which is far worse than horizontal, not just physical clearance." />
-      <${Setting} title="Max target distance" value=${cfg.maxTargetDistM} setfn=${mkNum('maxTargetDistM')} type="number" addonRight="m"
-        tip="Runtime sanity bound on how far the solved target may be from us. A solution beyond it is refused rather than chased, which is what stops a stale or spoofed position dragging the aircraft away." />
-      <${Setting} title="Altitude floor" value=${cfg.minAltM} setfn=${mkNum('minAltM')} type="number" addonRight="m"
-        tip="Absolute floor on the commanded home-relative altitude. A clamp rather than a refusal: the target is raised to it and the condition GVAR says so." />
-      <${Setting} title="Min course speed" value=${cfg.minCourseSpeed} setfn=${mkNum('minCourseSpeed')} type="number" addonRight="m/s"
-        tip="Below this leader ground speed their reported course is noise, so the last valid course is held instead - otherwise a hovering leader would spin the whole slot geometry around." />
-      ${err('bounds')}
-    <//>
-
-    <${Card} title="Heading" icon=${Icons.scan}>
-      <${Setting} title="Heading mode" value=${cfg.headingMode} setfn=${mk('headingMode')} type="select" options=${HEADING_MODES}
-        tip="What to command as nose heading, sent through waypoint 255's p1 field and MSP_SET_HEAD. Off leaves the FC's own heading logic alone." />
-      <${Setting} title="Heading angle" value=${cfg.headingDeg} setfn=${mkNum('headingDeg')} type="number" addonRight="°"
-        disabled=${cfg.headingMode !== 'FIXED' && cfg.headingMode !== 'COURSE_RELATIVE'}
-        tip="An absolute compass heading in Fixed mode, or an offset added to the leader's course in Course-relative mode." />
-    <//>
-
     <${Card} title="RC axis control" icon=${Icons.bolt}>
       <p class="text-xs text-gray-400 mb-3">
         Optionally drive one or more slot axes from a stick or knob, so the slot can be trimmed in flight.
@@ -407,24 +407,6 @@ export default function FollowPage({ status }) {
         frozen in and the condition GVAR reports it, rather than the aircraft flying the bad slot.
       <//>`}
       ${err('rc')}
-    <//>
-  <//>
-
-  <div class="flex flex-col gap-4">
-    <${FollowStatusPanel} status=${status} cfg=${cfg} />
-
-    <${Card} title="GVAR reporting" icon=${Icons.list}>
-      <p class="text-xs text-gray-400 mb-3">
-        INAV global variables Follow writes, so logic conditions and the OSD can react to lock state.
-        Disabled means nothing is sent at all - zero MSP traffic until a pilot opts in.
-      <//>
-      <${Setting} title="Status GVAR" value=${cfg.statusGvarIndex} setfn=${mk('statusGvarIndex')} type="select" options=${gvarOptions}
-        tip="Receives 0 idle, 1 acquiring, 2 locked, 3 holding. Never renumber these in a logic condition." />
-      <${Setting} title="Condition GVAR" value=${cfg.conditionFlagsGvarIndex} setfn=${mk('conditionFlagsGvarIndex')} type="select" options=${gvarOptions}
-        tip="Receives a condition code: 0 none, 1 altitude floor clamped, 2 target too far, 3 RC gap settings invalid. Sequential rather than a bitmask - if several are true in one cycle the highest wins." />
-      <${Setting} title="Debug GVARs" value=${cfg.debug} setfn=${mk('debug')} type="switch"
-        tip="Writes the raw north/east/altitude/heading solution into GVARs 0-3 for bench work. RAM only: it is never persisted and is off again after a reboot." />
-      ${err('gvar')}
     <//>
 
     <${Card} title="Autothrottle" icon=${Icons.bolt}>
@@ -452,12 +434,30 @@ export default function FollowPage({ status }) {
       ${err('autothrottle')}
     <//>
 
+    <${Card} title="GVAR reporting" icon=${Icons.list}>
+      <p class="text-xs text-gray-400 mb-3">
+        INAV global variables Follow writes, so logic conditions and the OSD can react to lock state.
+        Disabled means nothing is sent at all - zero MSP traffic until a pilot opts in.
+      <//>
+      <${Setting} title="Status GVAR" value=${cfg.statusGvarIndex} setfn=${mk('statusGvarIndex')} type="select" options=${gvarOptions}
+        tip="Receives 0 idle, 1 acquiring, 2 locked, 3 holding. Never renumber these in a logic condition." />
+      <${Setting} title="Condition GVAR" value=${cfg.conditionFlagsGvarIndex} setfn=${mk('conditionFlagsGvarIndex')} type="select" options=${gvarOptions}
+        tip="Receives a condition code: 0 none, 1 altitude floor clamped, 2 target too far, 3 RC gap settings invalid. Sequential rather than a bitmask - if several are true in one cycle the highest wins." />
+      <${Setting} title="Debug GVARs" value=${cfg.debug} setfn=${mk('debug')} type="switch"
+        tip="Writes the raw north/east/altitude/heading solution into GVARs 0-3 for bench work. RAM only: it is never persisted and is off again after a reboot." />
+      ${err('gvar')}
+    <//>
+
     <${Card}>
       ${result && html`<${Notification} ok=${result.ok} timeout=${result.ok ? 2500 : 9000}
         text=${result.text} close=${() => setResult(null)} />`}
       <${ConfigActions} onApply=${apply} onSave=${save} unsaved=${unsaved}
         disabled=${!!blocked} blockedReason=${blocked} />
     <//>
+  <//>
+
+  <div class="flex flex-col gap-4">
+    <${FollowStatusPanel} status=${status} cfg=${cfg} />
   <//>
 <//>`;
 }

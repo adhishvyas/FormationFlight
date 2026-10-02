@@ -192,7 +192,7 @@ Depends on: **D** (needs the firmware's status wire shape settled to mirror it).
 
 ---
 
-## G. Doc wrap-up + bench/flight checklist
+## G. Doc wrap-up + bench/flight checklist [Completed, except the physical flight test]
 
 Depends on: **E**, **F** (final behavior and wire shape settled).
 
@@ -201,6 +201,13 @@ Depends on: **E**, **F** (final behavior and wire shape settled).
 - Run the full native suite (`pio test -e native`, `node --test test/follow-logic.test.js`, `python3 test/test_mock_server.py`) one more time end-to-end per `scripts/run_tests.sh` before calling this done.
 - Bench checklist (spec §9.1.5, RAM — the only acceptance item that isn't a host-test assertion): flash `expresslrs_rx_2400_AntennaDiversity_via_WiFi`, compare `system.free_heap` before/after enabling, confirm the delta is in the ~220-250 byte ballpark from spec §6.
 - Flight checklist (spec §9.2): progressive A/B test per the spec's own steps — out of scope for this plan's automated work, tracked here as the final manual sign-off gate.
+
+**What actually ran (no hardware attached in this environment):** `scripts/run_tests.sh` ran clean end to end (362 native cases, 5 JS cases, 133 Python cases) and `pio run -e expresslrs_rx_2400_AntennaDiversity_via_WiFi` builds. The RAM check was done structurally instead of via a live `system.free_heap` read: compiling a throwaway translation unit against both `follow.h`/`follow_filter.h` (current) and the pre-feature `follow.h` (`git show 4f81273:lib/ff_core/follow.h`), with both the host (`g++`) and the actual target toolchain (`xtensa-lx106-elf-g++`) agreeing on layout —
+
+- `sizeof(ff::FollowPositionFilter)` = 96 bytes; `FollowController` gained two of them (`leaderFilter_`, `selfFilter_`) = **192 bytes**, within spec §6's ~220-250 byte estimate (a bit under, not over).
+- `sizeof(ff::FollowConfig)` is unchanged at 144 bytes before and after — the two new fields (`positionFilterEnabled`, `positionFilterStrengthPct`) fit entirely inside existing struct padding, adding 0 bytes.
+
+This is a static/structural measurement, not a live device reading, but it is exact (not an estimate) and immune to the heap-fragmentation noise a live `free_heap` diff would carry. The physical flight checklist (spec §9.2) still needs real hardware and remains the final manual sign-off gate, unchanged from this plan's original framing.
 
 ---
 

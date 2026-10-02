@@ -46,7 +46,8 @@ functionality differs between the two.
 8. [Troubleshooting](#8-troubleshooting)
 9. [Slot geometry diagram](#9-slot-geometry-diagram)
 10. [Speed Autothrottle (fixed wing, optional)](#10-speed-autothrottle-fixed-wing-optional)
-11. [Configuring Follow over the API](#11-configuring-follow-over-the-api)
+11. [Position filtering](#11-position-filtering)
+12. [Configuring Follow over the API](#12-configuring-follow-over-the-api)
 
 ---
 
@@ -135,7 +136,7 @@ of the three axes has a direction picker and a gap distance in meters:
 "Behind" plus "15 m" means 15 m behind the leader. The card also prints the
 raw stored values underneath, as `ofsLongM` (+ahead / -behind), `ofsLatM`
 (+right / -left) and `ofsVertM` (+above / -below) in meters, which are the same
-numbers the API uses (§11).
+numbers the API uses (§12).
 
 See [§9's diagram](#9-slot-geometry-diagram) for a picture of what each axis
 means and how the leader's own heading rotates the whole slot with it.
@@ -144,6 +145,11 @@ The factory default is *behind 15 m, centred, above 10 m* ("chase-high"), chosen
 because it keeps the follower clear of the leader's rotor wash while still
 being a sane geometry to bench-test with the leader sitting still or moving on
 the ground.
+
+This card also carries *Position filtering* and *Filter strength*, which are
+not about the geometry itself but about smoothing GPS noise out of both the
+leader's and the follower's own position before they reach this math. See
+[§11](#11-position-filtering).
 
 ### Trigger and target
 
@@ -860,7 +866,43 @@ speed readouts while autothrottle is engaged]*
 
 ---
 
-## 11. Configuring Follow over the API
+## 11. Position filtering
+
+Follow continuously smooths both the leader's position/course and this node's
+own GPS fix through a small recursive filter before either one reaches the
+slot math, instead of reacting to every raw, noisy fix. It is on by default,
+and most pilots never need to touch it.
+
+**What it fixes:** raw GPS jitters -- a stationary or slow-moving aircraft
+reports a slightly different position and course every update, even though
+nothing actually moved. Without filtering, that jitter shows up directly in
+the slot: the resolved target position, the commanded heading in *Point at
+leader* or *Course* mode, and (on a fixed wing) the autothrottle target speed
+all twitch cycle to cycle. Filtering trades a small amount of lag for a
+materially smoother, steadier solution, without changing where the slot sits
+on average.
+
+Both settings live in the *Slot geometry* card (§3):
+
+- *Position filtering*: on/off switch. Leave it on unless you are
+  specifically comparing behavior with it off, or ruling the filter out
+  while troubleshooting something else.
+- *Filter strength*: 0 to 100. `0` is the lightest smoothing, closest to
+  the raw, unfiltered behavior FF had before this feature existed; `100` is
+  the heaviest. Heavier smoothing rejects more GPS noise but reacts more
+  slowly to a genuine leader maneuver -- a real turn takes a little longer to
+  show up in the slot the higher this is set. The default, `50`, is a
+  starting point rather than a number validated against your specific GPS
+  modules or flying style: if the slot feels laggy through turns, lower it;
+  if it feels twitchy on a calm, straight leg, raise it.
+
+Turning *Position filtering* off reproduces exactly FF's pre-filtering
+behavior, bit for bit -- useful as a quick A/B if you want to confirm
+filtering is actually helping on your setup.
+
+---
+
+## 12. Configuring Follow over the API
 
 Everything on the *Follow* page is a view over the node's JSON API, which is
 documented in full in [`docs/v2-web-api.md`](v2-web-api.md). That document is

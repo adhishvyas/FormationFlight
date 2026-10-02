@@ -1,6 +1,9 @@
 # FormationFlight — Follow Position/Velocity Filtering — Engineering Spec
 
-**Status:** Draft — not yet planned or implemented
+**Status:** Implemented, pending bench/flight validation (§9.1.5's RAM check was confirmed by
+measuring the compiled struct sizes rather than a live on-device `free_heap` read — see
+[the plan](../plans/2026-10-01-FollowPositionFiltering-Plan.md)'s phase G notes; §9.2's flight
+test still needs real hardware and is unchanged as the final manual sign-off gate)
 
 > *Note (2026-10-01):* this spec was originally drafted referencing v1 file paths
 > and seams (`src/lib/Follow/FollowManager.cpp`, `GNSSManager`, `PeerManager`,

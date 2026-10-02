@@ -145,7 +145,7 @@ export function validateConfig(cfg) {
     return { section: 'autothrottle', message: 'speedCorrectionAccelCmS2 must be >= 0' };
   }
   if (cfg.positionFilterStrengthPct < 0 || cfg.positionFilterStrengthPct > 100) {
-    return { section: 'bounds', message: 'positionFilterStrengthPct must be 0-100' };
+    return { section: 'slot', message: 'positionFilterStrengthPct must be 0-100' };
   }
 
   const geo = offsetGeometryError(

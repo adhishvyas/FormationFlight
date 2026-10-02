@@ -173,10 +173,10 @@ Depends on: **C2**, **C3** (needs both filters fully wired to write the tests th
 Depends on: **B** (field names/validation for the config toggle), **D** (status fields for the display half).
 
 **`html/follow.js`:**
-- A new "Position Filtering" `Setting` row pair — an enable switch (`type="switch"`, mirrors the existing `debug` row's pattern) and a strength number field (`type="number"`, 0-100, mirrors `minCourseSpeed`'s pattern) — placed in the geometry/safety-bounds panel alongside the fields it most directly affects (`minCourseSpeed`, `headingMode`), or its own small panel if that reads better once laid out; implementer's call, no functional difference.
+- A new "Position Filtering" `Setting` row pair — an enable switch (`type="switch"`, mirrors the existing `debug` row's pattern) and a strength number field (`type="number"`, 0-100, mirrors `minCourseSpeed`'s pattern) — placed in the **Slot geometry** card, under `OffsetEditor`: this is about where the craft's solved position sits, not a safety refusal, so it belongs with the offset grid rather than in Safety bounds alongside the firmware's hard reject rules.
 - `FollowStatusPanel`: surface `leader_filter_initialized`/`self_filter_initialized` (e.g. small "filter: warming up / ready" indicators) alongside the existing `state`/`gate_active` display.
 
-**`html/follow-logic.js`:** already covered by **B**'s `validateConfig()` range-check addition — no further change here beyond confirming the UI's number input actually calls into it (it does, by the existing pattern every other numeric `Setting` follows).
+**`html/follow-logic.js`:** the range-check addition from **B** reports its own UI section, `'slot'` (not `'bounds'`), so `validateConfig()`'s error renders under the Slot geometry card the field now lives in via a new `${err('slot')}` call there, rather than under Safety bounds.
 
 **Manual check (not a host test — `html/` has no build step):** run the `web-ui-preview` skill against `scripts/mock_server.py` (whose `follow_json()`/`default_follow_config()` were updated in **B**/**F**) and confirm the new panel renders, round-trips a config change, and the status indicators reflect `_filter_initialized` toggling.
 

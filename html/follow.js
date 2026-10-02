@@ -331,6 +331,12 @@ export default function FollowPage({ status }) {
       <//>
       <${OffsetEditor} cfg=${cfg} setField=${setField} />
       ${geoErr && html`<p class="text-xs text-red-600 mt-1">${geoErr}<//>`}
+      <${Setting} title="Position filtering" value=${cfg.positionFilterEnabled} setfn=${mk('positionFilterEnabled')} type="switch"
+        tip="Smooths both the leader's and this node's own GPS position/course with a recursive filter before they reach the slot math, instead of reacting to every raw fix. On by default." />
+      <${Setting} title="Filter strength" value=${cfg.positionFilterStrengthPct} setfn=${mkNum('positionFilterStrengthPct')} type="number" addonRight="%"
+        disabled=${!cfg.positionFilterEnabled}
+        tip="0 is the lightest smoothing, 100 the heaviest. Heavier smoothing rejects more GPS noise but lags a real maneuver more." />
+      ${err('slot')}
     <//>
 
     <${Card} title="Trigger and target" icon=${Icons.bolt}>
@@ -377,11 +383,6 @@ export default function FollowPage({ status }) {
         tip="Absolute floor on the commanded home-relative altitude. A clamp rather than a refusal: the target is raised to it and the condition GVAR says so." />
       <${Setting} title="Min course speed" value=${cfg.minCourseSpeed} setfn=${mkNum('minCourseSpeed')} type="number" addonRight="m/s"
         tip="Below this leader ground speed their reported course is noise, so the last valid course is held instead - otherwise a hovering leader would spin the whole slot geometry around." />
-      <${Setting} title="Position filtering" value=${cfg.positionFilterEnabled} setfn=${mk('positionFilterEnabled')} type="switch"
-        tip="Smooths both the leader's and this node's own GPS position/course with a recursive filter before they reach the slot math, instead of reacting to every raw fix. On by default." />
-      <${Setting} title="Filter strength" value=${cfg.positionFilterStrengthPct} setfn=${mkNum('positionFilterStrengthPct')} type="number" addonRight="%"
-        disabled=${!cfg.positionFilterEnabled}
-        tip="0 is the lightest smoothing, 100 the heaviest. Heavier smoothing rejects more GPS noise but lags a real maneuver more." />
       ${err('bounds')}
     <//>
 
